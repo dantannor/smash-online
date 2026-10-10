@@ -159,7 +159,7 @@ test("pad-helper JSON lines drive P1 as kind 3", async (t) => {
   const { dir, file } = fixture(t);
   const sidecar = new Sidecar({ file, p1: "pad-helper" }).start();
   t.after(() => { sidecar.close(); fs.rmSync(dir, { recursive: true, force: true }); });
-  sidecar.startHelper(`${process.execPath} -e 'console.log(JSON.stringify({buttons:4660,sx:-12,sy:34})); setInterval(() => {}, 1000)'`);
+  sidecar.startHelper(`${process.execPath} -e 'console.log(JSON.stringify({buttons:4660,sx:-12,sy:34}))'`);
   for (let i = 0; i < 20 && decodeOSI1(fs.readFileSync(file)).ports[0].buttons !== 4660; i++) await sleep(10);
   assert.deepEqual(decodeOSI1(fs.readFileSync(file)).ports[0], { kind: KINDS.FILE_DRIVEN_PAD, enabled: 1, buttons: 4660, sx: -12, sy: 34 });
 });

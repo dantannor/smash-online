@@ -121,7 +121,7 @@ export class Sidecar {
   }
 
   startHelper(command) {
-    const child = spawn(command, { shell: true, stdio: ["ignore", "pipe", "inherit"] });
+    const child = spawn(command, { shell: true, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "inherit"] });
     this.helper = child;
     let pending = "";
     child.stdout.setEncoding("utf8");
@@ -153,7 +153,12 @@ export class Sidecar {
     this.closed = false;
     this.writeSnapshot();
     this.closed = true;
-    this.helper?.kill("SIGTERM");
+    if (this.helper) {
+      try {
+        if (process.platform !== "win32" && this.helper.pid) process.kill(-this.helper.pid, "SIGTERM");
+        else this.helper.kill("SIGTERM");
+      } catch (error) { if (error.code !== "ESRCH") this.onError(error); }
+    }
   }
 }
 
