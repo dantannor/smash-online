@@ -1,0 +1,31 @@
+{
+  "mode": "mock",
+  "url": "http://127.0.0.1:50807",
+  "label": "mock",
+  "seconds": 3,
+  "collectedAt": "2026-10-10T11:47:00.913Z",
+  "rttMs": {
+    "mean": 0.08333333333333333,
+    "samples": 12
+  },
+  "jitterBufferMs": {
+    "mean": 8.01919706165606,
+    "samples": 11
+  },
+  "framesPerSecond": {
+    "mean": 60.45454545454545,
+    "samples": 11
+  },
+  "framesDropped": {
+    "last": 0
+  },
+  "framesDecoded": {
+    "last": 173
+  },
+  "glassToGlassMs": {
+    "mean": 22.649881998697918,
+    "median": 22.7998046875,
+    "samples": 12
+  },
+  "peerStatsAvailable": true
+}
