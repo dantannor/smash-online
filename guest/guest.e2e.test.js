@@ -20,7 +20,8 @@ test('guest plays host video and delivers near-60Hz increasing-sequence input', 
     if (req.url.startsWith('/api/rooms/')) {
       res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ port: 2, slotSession: 'test' })); return;
     }
-    let file = req.url === '/play' || req.url.startsWith('/play?') ? path.join(guestDir, 'index.html') : path.resolve(root, `.${decodeURIComponent(new URL(req.url, 'http://localhost').pathname)}`);
+    const pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
+    let file = pathname === '/play' ? path.join(guestDir, 'index.html') : pathname.startsWith('/play/') ? path.join(guestDir, pathname.slice('/play/'.length)) : path.resolve(root, `.${pathname}`);
     if (!file.startsWith(root)) { res.writeHead(403); res.end(); return; }
     try { const data = await readFile(file); res.writeHead(200, { 'content-type': file.endsWith('.js') ? 'text/javascript' : 'text/html' }); res.end(data); }
     catch { res.writeHead(404); res.end('not found'); }

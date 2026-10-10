@@ -1,6 +1,6 @@
 # Smash Online
 
-Local Smash 64 streaming/input prototype with game, sidecar, signaling server, host, guest, and browser harness. Phase 2 is **blocked**: mock tests pass, but the real-browser harness times out after opening the host canvas and guest page, before the guest reports a connected WebRTC session. See [Phase 2 evidence](docs/evidence/phase2-status.json).
+Local Smash 64 streaming/input prototype with game, sidecar, signaling server, host, guest, and browser harness. DW3 now passes on the real local stack. Phase 2 is **blocked** at DW4: `game/run-game.sh` fails compiling its ScreenCaptureKit helper because the `swiftc` command passes a stray backslash. See [Phase 2 evidence](docs/evidence/phase2-status.json).
 
 ## Local setup
 
@@ -15,7 +15,7 @@ Local Smash 64 streaming/input prototype with game, sidecar, signaling server, h
 
 Guests use keyboard or a standard gamepad; the guest input hook is available for tests. P1 is intended to use the game-window keyboard (kind 2); keep the game window focused. Mapping is documented in [game/README.md](game/README.md). Daniel still needs to manually verify P1 controls in VS character select. No host-page Gamepad-to-P1 path is currently implemented.
 
-Audio capture has not been verified on macOS. The host requests audio from `getDisplayMedia`, but window-capture audio support varies by Chrome/macOS capture source. Do not assume BattleShip audio is streamed. If the manual test confirms silence, the next option is a separate ScreenCaptureKit audio capture track (no install/paid tools), then retest synchronization. See [docs/LATENCY.md](docs/LATENCY.md) for mock-only numbers and pending real measurements, and [docs/PHONE-TEST.md](docs/PHONE-TEST.md) for the later cellular test.
+Audio capture from the BattleShip window was not reached because DW4 stopped at the game helper build. Canvas mode's generated audio is only a synthetic test tone and does not prove game audio. If the later macOS window-capture test has no game audio, the next option is a separate ScreenCaptureKit audio track (no install/paid tools), followed by a sync retest. See [docs/LATENCY.md](docs/LATENCY.md) for mock-only numbers and pending real measurements, and [docs/PHONE-TEST.md](docs/PHONE-TEST.md) for the later cellular test.
 
 ## Tests
 

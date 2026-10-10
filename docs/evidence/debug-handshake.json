@@ -1,0 +1,207 @@
+{
+  "ok": true,
+  "phase": "connected",
+  "guest": {
+    "connection": "Connected",
+    "slot": 2,
+    "controller": "Keyboard",
+    "ping": null,
+    "fps": null,
+    "error": null
+  },
+  "host": {
+    "frame": 21,
+    "timestamp": 1791666312467.8,
+    "video": {
+      "frame": 21,
+      "timestamp": 1791666312467.8,
+      "captured": true
+    },
+    "slots": {
+      "2": {
+        "status": "connected",
+        "ping": null
+      },
+      "3": {
+        "status": "empty",
+        "ping": null
+      },
+      "4": {
+        "status": "empty",
+        "ping": null
+      }
+    },
+    "peers": {
+      "2": {
+        "state": "connected",
+        "dataChannel": "open",
+        "rtcStats": null
+      }
+    },
+    "capturedTracks": [
+      {
+        "kind": "audio",
+        "readyState": "live",
+        "contentHint": ""
+      },
+      {
+        "kind": "video",
+        "readyState": "live",
+        "contentHint": "motion"
+      }
+    ],
+    "source": "canvas"
+  },
+  "events": [
+    {
+      "source": "server",
+      "line": "Smash Online server listening on http://127.0.0.1:56522"
+    },
+    {
+      "source": "sidecar",
+      "line": "sidecar listening on ws://127.0.0.1:56523"
+    },
+    {
+      "source": "host",
+      "event": "console",
+      "level": "warning",
+      "text": "The AudioContext was not allowed to start. It must be resumed (or created) after a user gesture on the page. https://developer.chrome.com/blog/autoplay/#web_audio"
+    },
+    {
+      "source": "server",
+      "line": "{\"event\":\"ws\",\"direction\":\"out\",\"role\":\"host\",\"port\":2,\"connectionId\":\"V8U2pyD4h5FkHKbu\",\"type\":\"slot:connected\"}"
+    },
+    {
+      "source": "server",
+      "line": "{\"event\":\"ws\",\"direction\":\"in\",\"role\":\"host\",\"port\":2,\"connectionId\":null,\"type\":\"offer\"}"
+    },
+    {
+      "source": "server",
+      "line": "{\"event\":\"ws\",\"direction\":\"out\",\"role\":\"guest\",\"port\":2,\"connectionId\":\"V8U2pyD4h5FkHKbu\",\"type\":\"offer\"}"
+    },
+    {
+      "source": "server",
+      "line": "{\"event\":\"ws\",\"direction\":\"in\",\"role\":\"host\",\"port\":2,\"connectionId\":null,\"type\":\"ice\"}"
+    },
+    {
+      "source": "server",
+      "line": "{\"event\":\"ws\",\"direction\":\"out\",\"role\":\"guest\",\"port\":2,\"connectionId\":\"V8U2pyD4h5FkHKbu\",\"type\":\"ice\"}"
+    },
+    {
+      "source": "server",
+      "line": "{\"event\":\"ws\",\"direction\":\"in\",\"role\":\"host\",\"port\":2,\"connectionId\":null,\"type\":\"ice\"}"
+    },
+    {
+      "source": "server",
+      "line": "{\"event\":\"ws\",\"direction\":\"out\",\"role\":\"guest\",\"port\":2,\"connectionId\":\"V8U2pyD4h5FkHKbu\",\"type\":\"ice\"}"
+    },
+    {
+      "source": "server",
+      "line": "{\"event\":\"ws\",\"direction\":\"in\",\"role\":\"host\",\"port\":2,\"connectionId\":null,\"type\":\"ice\"}"
+    },
+    {
+      "source": "server",
+      "line": "{\"event\":\"ws\",\"direction\":\"out\",\"role\":\"guest\",\"port\":2,\"connectionId\":\"V8U2pyD4h5FkHKbu\",\"type\":\"ice\"}"
+    },
+    {
+      "source": "server",
+      "line": "{\"event\":\"ws\",\"direction\":\"in\",\"role\":\"host\",\"port\":2,\"connectionId\":null,\"type\":\"ice\"}"
+    },
+    {
+      "source": "server",
+      "line": "{\"event\":\"ws\",\"direction\":\"out\",\"role\":\"guest\",\"port\":2,\"connectionId\":\"V8U2pyD4h5FkHKbu\",\"type\":\"ice\"}"
+    },
+    {
+      "source": "server",
+      "line": "{\"event\":\"ws\",\"direction\":\"in\",\"role\":\"host\",\"port\":2,\"connectionId\":null,\"type\":\"ice\"}"
+    },
+    {
+      "source": "server",
+      "line": "{\"event\":\"ws\",\"direction\":\"out\",\"role\":\"guest\",\"port\":2,\"connectionId\":\"V8U2pyD4h5FkHKbu\",\"type\":\"ice\"}"
+    },
+    {
+      "source": "server",
+      "line": "{\"event\":\"ws\",\"direction\":\"in\",\"role\":\"host\",\"port\":2,\"connectionId\":null,\"type\":\"ice\"}"
+    },
+    {
+      "source": "server",
+      "line": "{\"event\":\"ws\",\"direction\":\"out\",\"role\":\"guest\",\"port\":2,\"connectionId\":\"V8U2pyD4h5FkHKbu\",\"type\":\"ice\"}"
+    },
+    {
+      "source": "server",
+      "line": "{\"event\":\"ws\",\"direction\":\"in\",\"role\":\"host\",\"port\":2,\"connectionId\":null,\"type\":\"ice\"}"
+    },
+    {
+      "source": "server",
+      "line": "{\"event\":\"ws\",\"direction\":\"out\",\"role\":\"guest\",\"port\":2,\"connectionId\":\"V8U2pyD4h5FkHKbu\",\"type\":\"ice\"}"
+    },
+    {
+      "source": "server",
+      "line": "{\"event\":\"ws\",\"direction\":\"in\",\"role\":\"host\",\"port\":2,\"connectionId\":null,\"type\":\"ice\"}"
+    },
+    {
+      "source": "server",
+      "line": "{\"event\":\"ws\",\"direction\":\"out\",\"role\":\"guest\",\"port\":2,\"connectionId\":\"V8U2pyD4h5FkHKbu\",\"type\":\"ice\"}"
+    },
+    {
+      "source": "server",
+      "line": "{\"event\":\"ws\",\"direction\":\"in\",\"role\":\"host\",\"port\":2,\"connectionId\":null,\"type\":\"ice\"}"
+    },
+    {
+      "source": "server",
+      "line": "{\"event\":\"ws\",\"direction\":\"out\",\"role\":\"guest\",\"port\":2,\"connectionId\":\"V8U2pyD4h5FkHKbu\",\"type\":\"ice\"}"
+    },
+    {
+      "source": "server",
+      "line": "{\"event\":\"ws\",\"direction\":\"in\",\"role\":\"host\",\"port\":2,\"connectionId\":null,\"type\":\"ice\"}"
+    },
+    {
+      "source": "server",
+      "line": "{\"event\":\"ws\",\"direction\":\"out\",\"role\":\"guest\",\"port\":2,\"connectionId\":\"V8U2pyD4h5FkHKbu\",\"type\":\"ice\"}"
+    },
+    {
+      "source": "server",
+      "line": "{\"event\":\"ws\",\"direction\":\"in\",\"role\":\"host\",\"port\":2,\"connectionId\":null,\"type\":\"ice\"}"
+    },
+    {
+      "source": "server",
+      "line": "{\"event\":\"ws\",\"direction\":\"out\",\"role\":\"guest\",\"port\":2,\"connectionId\":\"V8U2pyD4h5FkHKbu\",\"type\":\"ice\"}"
+    },
+    {
+      "source": "server",
+      "line": "{\"event\":\"ws\",\"direction\":\"in\",\"role\":\"host\",\"port\":2,\"connectionId\":null,\"type\":\"ice\"}"
+    },
+    {
+      "source": "server",
+      "line": "{\"event\":\"ws\",\"direction\":\"out\",\"role\":\"guest\",\"port\":2,\"connectionId\":\"V8U2pyD4h5FkHKbu\",\"type\":\"ice\"}"
+    },
+    {
+      "source": "server",
+      "line": "{\"event\":\"ws\",\"direction\":\"in\",\"role\":\"guest\",\"port\":2,\"connectionId\":\"V8U2pyD4h5FkHKbu\",\"type\":\"answer\"}"
+    },
+    {
+      "source": "server",
+      "line": "{\"event\":\"ws\",\"direction\":\"out\",\"role\":\"host\",\"port\":2,\"connectionId\":null,\"type\":\"answer\"}"
+    },
+    {
+      "source": "server",
+      "line": "{\"event\":\"ws\",\"direction\":\"in\",\"role\":\"guest\",\"port\":2,\"connectionId\":\"V8U2pyD4h5FkHKbu\",\"type\":\"ice\"}"
+    },
+    {
+      "source": "server",
+      "line": "{\"event\":\"ws\",\"direction\":\"out\",\"role\":\"host\",\"port\":2,\"connectionId\":null,\"type\":\"ice\"}"
+    },
+    {
+      "source": "server",
+      "line": "{\"event\":\"ws\",\"direction\":\"in\",\"role\":\"guest\",\"port\":2,\"connectionId\":\"V8U2pyD4h5FkHKbu\",\"type\":\"ice\"}"
+    },
+    {
+      "source": "server",
+      "line": "{\"event\":\"ws\",\"direction\":\"out\",\"role\":\"host\",\"port\":2,\"connectionId\":null,\"type\":\"ice\"}"
+    },
+    {
+      "source": "server",
+      "line": "{\"event\":\"ws\",\"direction\":\"out\",\"role\":\"host\",\"port\":2,\"connectionId\":\"V8U2pyD4h5FkHKbu\",\"type\":\"slot:disconnected\"}"
+    }
+  ]
+}

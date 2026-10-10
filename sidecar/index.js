@@ -33,9 +33,8 @@ export class Sidecar {
     if (this.closed || this.fd === null) return;
     const snapshot = encodeOSI1({ seq: this.seq++ >>> 0, mute: 0, ports: this.slots });
     try {
-      let offset = 0;
-      while (offset < snapshot.length) offset += fs.writeSync(this.fd, snapshot, offset, snapshot.length - offset, offset);
-      fs.ftruncateSync(this.fd, snapshot.length);
+      const written = fs.writeSync(this.fd, snapshot, 0, snapshot.length, 0);
+      if (written !== snapshot.length) throw new Error(`short OSI1 write: ${written}/${snapshot.length} bytes`);
     } catch (error) { this.onError(error); }
   }
 
@@ -43,6 +42,7 @@ export class Sidecar {
     fs.mkdirSync(path.dirname(this.file), { recursive: true });
     try { this.fd = fs.openSync(this.file, "r+"); }
     catch (error) { if (error.code !== "ENOENT") throw error; this.fd = fs.openSync(this.file, "w+", 0o600); }
+    if (fs.fstatSync(this.fd).size !== 80) fs.ftruncateSync(this.fd, 80);
     this.writeSnapshot();
     this.timer = setInterval(() => {
       this.writeSnapshot();

@@ -11,6 +11,7 @@ const PORTS = [2, 3, 4];
 const STUN = ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302"];
 const MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".ico": "image/x-icon", ".wasm": "application/wasm", ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf", ".otf": "font/otf", ".mp4": "video/mp4", ".webm": "video/webm", ".txt": "text/plain; charset=utf-8" };
 const ROM_EXT = new Set([".n64", ".z64", ".v64", ".o2r", ".otr"]);
+const DEBUG_WS = process.env.SMASH_DEBUG === "1";
 const hash = (token) => createHash("sha256").update(token).digest();
 const token = () => randomBytes(32).toString("base64url");
 const json = (res, status, data) => { res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" }); res.end(JSON.stringify(data)); };
@@ -70,6 +71,7 @@ export function createApplication({ now = Date.now } = {}) {
     const role = url.searchParams.get("role");
     const supplied = url.searchParams.get("token") || "";
     let port = Number(url.searchParams.get("port"));
+    ws.smashMeta = { role, port: Number.isFinite(port) && port > 0 ? port : null, room: room?.id ?? null, connectionId: null };
     let authorized = false;
     if (room && role === "host") authorized = equal(room.tokenHash, hash(supplied));
     if (room && role === "guest" && PORTS.includes(port)) authorized = equal(room.slots[port].tokenHash, hash(supplied));
@@ -83,6 +85,7 @@ export function createApplication({ now = Date.now } = {}) {
       const slot = room.slots[port];
       if (slot.socket?.readyState === WebSocket.OPEN) slot.socket.close(4001, "slot replaced");
       connectionId = randomBytes(12).toString("base64url"); slot.socket = ws; slot.connectionId = connectionId;
+      ws.smashMeta.connectionId = connectionId;
       if (room.host?.readyState === WebSocket.OPEN) send(room.host, { type: "slot:connected", port, connectionId });
     }
     const meta = { room, role, port, connectionId };
@@ -90,9 +93,10 @@ export function createApplication({ now = Date.now } = {}) {
     ws.on("message", (data, isBinary) => {
       if (isBinary) return sendError(ws, "BAD_MESSAGE", "Messages must be JSON text");
       let message;
-      try { message = JSON.parse(data.toString()); } catch { return sendError(ws, "BAD_MESSAGE", "Invalid JSON envelope"); }
-      if (!message || typeof message !== "object" || Array.isArray(message)) return sendError(ws, "BAD_MESSAGE", "Expected a JSON envelope");
+      try { message = JSON.parse(data.toString()); } catch { debugWs("in", ws, { type: "invalid_json" }); return sendError(ws, "BAD_MESSAGE", "Invalid JSON envelope"); }
+      if (!message || typeof message !== "object" || Array.isArray(message)) { debugWs("in", ws, { type: "invalid_envelope" }); return sendError(ws, "BAD_MESSAGE", "Expected a JSON envelope"); }
       const { type } = message;
+      debugWs("in", ws, message);
       if (role === "host" && type === "offer") {
         if (!PORTS.includes(message.port) || typeof message.sdp !== "string" || message.sdp.length > 900_000) return sendError(ws, "BAD_MESSAGE", "Invalid offer");
         relay(room.slots[message.port].socket, { type, port: message.port, sdp: message.sdp });
@@ -127,7 +131,16 @@ export function createApplication({ now = Date.now } = {}) {
 }
 
 function equal(expected, actual) { return expected.length === actual.length && timingSafeEqual(expected, actual); }
-function send(ws, data) { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(data)); }
+function send(ws, data) {
+  if (ws?.readyState !== WebSocket.OPEN) return;
+  debugWs("out", ws, data);
+  ws.send(JSON.stringify(data));
+}
+function debugWs(direction, ws, message) {
+  if (!DEBUG_WS) return;
+  const meta = ws?.smashMeta ?? {};
+  console.log(JSON.stringify({ event: "ws", direction, role: meta.role ?? "unknown", port: message.port ?? meta.port ?? null, connectionId: message.connectionId ?? meta.connectionId ?? null, type: typeof message.type === "string" ? message.type : "unknown" }));
+}
 function sendError(ws, code, message) { send(ws, { type: "error", code, message }); }
 function relay(ws, message) { if (ws?.readyState === WebSocket.OPEN) send(ws, message); }
 function forwardedOrigin(req) {

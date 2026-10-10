@@ -1,39 +1,39 @@
 {
   "status": "blocked",
-  "blockingEvidence": {
-    "realHarnessCommand": "perl -e 'alarm 90; exec @ARGV' -- env SMASH_E2E_REAL=1 node --test --test-timeout=60000 harness/e2e.test.js",
-    "realHarnessResult": "FAIL: guest P2 never reached Connected. Focused run reported page.waitForFunction: Timeout 12000ms exceeded at harness/e2e.test.js:95. A separate run hit the 60000ms Node test timeout during cleanup.",
-    "observedProgress": ["real processes ready", "browser launched", "host canvas active", "guest P2 page loaded"],
-    "observedBrowserConsole": "One 404 resource error on guest P2; exact URL was not captured."
-  },
-  "completed": {
-    "seamFixes": [
-      "Sidecar keeps an open OSI1 file descriptor and updates the same 80-byte file in place.",
-      "500ms input timeout neutralizes but preserves enabled kind-3 connection; valid input resumes it. Explicit disconnect remains neutral and disabled.",
-      "Protocol helpers are browser-safe with token generation isolated in shared/node-protocol.js; host and guest use shared protocol helpers/constants.",
-      "PROTOCOL.md and harness docs agree on the 96-bit barcode in the first 96 pixels across 12 rows.",
-      "Server ROM deny list includes .v64 and .otr.",
-      "Server and harness real-mode ports are ephemeral; npm test has a 30-second per-test timeout; sidecar helper cleanup has an EPERM fallback.",
-      "Integrated host lane C from origin/lane-c-host into the integrate worktree."
-    ],
-    "focusedTests": "PASS: 22/22 host, mock harness, sidecar, protocol, and server tests.",
-    "fullSuite": "PASS: npm test, 28/28.",
-    "mockE2E": {"p50Ms": 0.80908203125, "p95Ms": 8.22705078125, "maxMs": 8.22705078125, "samples": 15, "report": "harness/reports/e2e-sample.json"}
+  "cause": "DW4 stopped at game launcher failure, before Chrome windows opened.",
+  "debugHandshake": {
+    "status": "PASS",
+    "script": "harness/debug-handshake.mjs",
+    "evidence": "docs/evidence/debug-handshake.json",
+    "found404": "http://127.0.0.1:<ephemeral>/guest/guest.js",
+    "fix": "Guest entry now loads /play/guest.js; relative input-map and shared protocol imports resolve under the server's /play and /shared routes."
   },
   "doneWhen": {
-    "DW3": {"status": "BLOCKED", "evidence": "realHarnessResult"},
-    "DW4": {"status": "PENDING", "reason": "real guest connection did not complete; no game or visible windows launched"},
-    "DW5": {"status": "PENDING", "reason": "tunnel not started; local real loop is not passing"},
+    "DW3": {"status": "PASS", "evidence": "docs/evidence/DW3-real-e2e.json", "inputSamples": 15, "p50Ms": 0.703857421875, "p95Ms": 1.659423828125, "maxMs": 1.659423828125, "disconnectNeutralMs": "within 500ms", "rejoinSameSlot": true},
+    "DW4": {"status": "BLOCKED", "evidence": "docs/evidence/dw4-report.json", "error": "clang: error: no such file or directory: '\\'"},
+    "DW5": {"status": "NOT RUN", "reason": "Stopped after the DW4 failure gate; no tunnel was started."},
     "DW6": {"status": "PENDING", "evidence": "docs/LATENCY.md"},
-    "DW7": {"status": "PENDING-DANIEL", "evidence": "game/README.md; manual P1 check not performed"},
-    "DW8": {"status": "PENDING", "reason": "no real display capture/audio test; proposed follow-up is a separate ScreenCaptureKit audio track if Chrome window capture is silent"}
+    "DW7": {"status": "PENDING-DANIEL", "evidence": "game/README.md"},
+    "DW8": {"status": "PENDING", "reason": "DW4 did not reach display capture; canvas source audio is synthetic and does not prove game audio."}
   },
-  "pending": ["DW3 real input latencies, disconnect/rejoin proof", "DW4 visible game/host/guest proof", "DW5 public tunnel + remote guest video", "DW6 local/tunnel latency probe and glass-to-glass", "DW7 manual P1 control check; gamepad P1 path unverified", "DW8 macOS game-audio test and exact implementation decision"],
-  "commands": [
-    {"command": "perl -e 'alarm 90; exec @ARGV' -- node --test --test-timeout=30000 sidecar/index.test.js shared/protocol.test.js server/index.test.js", "result": "PASS, 20/20"},
-    {"command": "perl -e 'alarm 80; exec @ARGV' -- node --test --test-timeout=30000 host/host.test.js harness/e2e.test.js sidecar/index.test.js shared/protocol.test.js server/index.test.js", "result": "PASS for all subtests except mock harness predicate during an intermediate edit; fixed and rerun: host + mock harness 2/2 PASS"},
-    {"command": "perl -e 'alarm 150; exec @ARGV' -- npm test", "result": "PASS, 28/28"},
-    {"command": "perl -e 'alarm 45; exec @ARGV' -- env SMASH_E2E_REAL=1 node --test --test-timeout=30000 harness/e2e.test.js", "result": "BLOCKED, guest P2 did not report Connected within 12 seconds; separate attempt timed out at 60 seconds"}
+  "otherEvidence": {
+    "realHarnessJson": "harness/reports/e2e-1791666378893.json",
+    "debugServerLogs": "docs/evidence/debug-handshake.json",
+    "mockLatencyMs": {"p50": 0.80908203125, "p95": 8.22705078125, "max": 8.22705078125}
+  },
+  "seamFixes": [
+    "In-place OSI1 updates now use one 80-byte write through a persistent descriptor; file length is fixed at startup only.",
+    "A 500ms input lapse neutralizes without disconnecting; explicit disconnect disables within the required bound.",
+    "Browser protocol helpers are free of Node crypto/Buffer APIs; token generation is node-only.",
+    "Host and guest handshake fields match the server relay; ICE candidate objects relay in both directions.",
+    "Server WS diagnostics log role, message type, port, and connection ID only, never credentials or SDP.",
+    "ROM deny list includes .v64 and .otr; browser tests use ephemeral ports and bounded cleanup."
   ],
-  "runningProcesses": "none"
+  "verification": {
+    "realHandshake": "PASS, one host and guest reached datachannel open; see debug-handshake.json",
+    "realDW3": "PASS, three guests route to OSI1, disconnect neutralizes, same link reconnects",
+    "npmTest": "Last run before this correction, 28/28; rerun is blocked by the DW4 stop gate.",
+    "pr7": "Merged at 83139e5cfca246e49c405ba02b84073770d49ca8, CI test job passed. Correction changes since that merge remain uncommitted.",
+    "runningProcesses": "none; game did not launch and no Chrome windows remain."
+  }
 }
