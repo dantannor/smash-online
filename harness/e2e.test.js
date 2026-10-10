@@ -15,6 +15,7 @@ const timeoutMs = 60_000;
 const realMode = process.env.SMASH_E2E_REAL === "1";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const percentile = (values, p) => values.length ? values.slice().sort((a, b) => a - b)[Math.ceil(values.length * p) - 1] : null;
+const trace = (...values) => { if (process.env.SMASH_E2E_TRACE === "1") console.log("[SMASH_E2E_TRACE]", ...values); };
 
 async function waitFor(fn, timeout = 7000, interval = 15) {
   const end = Date.now() + timeout;
@@ -24,6 +25,11 @@ async function waitFor(fn, timeout = 7000, interval = 15) {
     await delay(interval);
   }
   throw new Error(`condition not met within ${timeout}ms`);
+}
+async function boundedCleanup(label, task, timeout = 5000) {
+  if (!task) return;
+  try { await Promise.race([task, delay(timeout).then(() => { throw new Error(`${label} exceeded ${timeout}ms`); })]); }
+  catch (error) { trace(`cleanup-warning:${label}`, error.message); }
 }
 
 async function ephemeralPort() {
@@ -42,13 +48,16 @@ async function startRealProcesses(osiPath) {
   const origin = `http://127.0.0.1:${serverPort}`;
   const children = [
     spawn(process.execPath, ["server/index.js"], { cwd: root, env: { ...process.env, PORT: String(serverPort) }, stdio: "ignore" }),
-    spawn(process.execPath, ["sidecar/index.js", "--port", String(sidecarPort)], { cwd: root, env: { ...process.env, OPENSMASH_LAUNCHER_INPUT: osiPath }, stdio: "ignore" }),
+    spawn(process.execPath, ["sidecar/index.js", "--file", osiPath, "--port", String(sidecarPort)], { cwd: root, env: process.env, stdio: "ignore" }),
   ];
   try {
     await waitFor(async () => {
       try { return (await fetch(`${origin}/healthz`)).ok; } catch { return false; }
     }, 8000);
-    return { origin, sidecarUrl: `ws://127.0.0.1:${sidecarPort}`, stop: async () => { for (const child of children) child.kill("SIGTERM"); await Promise.all(children.map((child) => new Promise((resolve) => child.once("exit", resolve)))); } };
+    await waitFor(async () => {
+      try { return decodeOSI1(await readFile(osiPath)).seq >= 0; } catch { return false; }
+    }, 8000);
+    return { origin, sidecarUrl: `ws://127.0.0.1:${sidecarPort}`, stop: async () => { for (const child of children) if (child.exitCode === null) child.kill("SIGTERM"); await Promise.all(children.map((child) => child.exitCode !== null ? Promise.resolve() : new Promise((resolve) => child.once("exit", resolve)))); } };
   } catch (error) {
     children.forEach((child) => child.kill("SIGTERM"));
     throw error;
@@ -85,6 +94,7 @@ async function runScenario(t) {
     await host.goto(hostUrl.toString());
     await host.waitForFunction(() => typeof window.__smashHostStats === "function", null, { timeout: 10000 });
     await host.waitForFunction(async () => (await window.__smashHostStats())?.frame > 10, null, { timeout: 10000 });
+    trace("host-canvas-ready");
 
     const slotUrls = roomInfo.slots.sort((a, b) => a.port - b.port).map((slot) => ({ port: slot.port, url: slot.guestUrl }));
     assert.deepEqual(slotUrls.map((slot) => slot.port), [2, 3, 4]);
@@ -94,6 +104,7 @@ async function runScenario(t) {
       await page.goto(slot.url, { timeout: 10000 });
       try {
         await page.waitForFunction((useRealPage) => useRealPage ? window.__smashGuest?.state.connection === "Connected" : window.__smashGuest?.state.connected === true, realMode, { timeout: 8000 });
+      trace(`guest-connected-p${slot.port}`);
       } catch (error) {
         const guestState = await page.evaluate(() => ({ state: window.__smashGuest?.stats(), hint: document.querySelector("#hint")?.textContent })).catch(() => null);
         const hostState = await host.evaluate(() => window.__smashHostStats()).catch(() => null);
@@ -103,20 +114,32 @@ async function runScenario(t) {
 
     for (const guest of guests) {
       const epochBase = await guest.page.evaluate(() => performance.timeOrigin);
+      trace(`input-p${guest.port}-measurement-start`);
       for (let sample = 0; sample < 5; sample++) {
         const input = { buttons: 0x8000 >>> (guest.port - 2), sx: guest.port * 7 + sample, sy: -guest.port * 3 - sample };
-        const sent = await guest.page.evaluate((value) => window.__smashGuest.setVirtualInput(value), input);
+        trace(`input-p${guest.port}-sending-sample${sample + 1}`);
+        const sent = await guest.page.evaluate((value) => {
+          if (window.__smashGuest?.state.connection) {
+            const epoch = performance.timeOrigin + performance.now();
+            window.__smashGuest.setVirtualInput(value);
+            return { epoch };
+          }
+          return window.__smashGuest.setVirtualInput(value);
+        }, input);
+        trace(`input-p${guest.port}-sent`, JSON.stringify(sent));
         const receipt = await waitFor(async () => {
           if (realMode) {
-            const bytes = await readFile(osiPath);
-            const packet = decodeOSI1(bytes).ports[guest.port - 1];
-            return packet.enabled && packet.buttons === input.buttons && packet.sx === input.sx && packet.sy === input.sy ? { receivedAt: Date.now() } : false;
+            let packet;
+            try { packet = decodeOSI1(await readFile(osiPath)).ports[guest.port - 1]; } catch { return false; }
+            return packet.enabled && packet.buttons === input.buttons && packet.sx === input.sx && packet.sy === input.sy ? { receivedAt: performance.timeOrigin + performance.now() } : false;
           }
           const state = await fetch(`${origin}/mock/state`).then((response) => response.json());
           return state.receiptTimes.find((entry) => entry.port === guest.port && entry.t === sent.t) ?? false;
         }, 2500);
-        const latency = realMode ? receipt.receivedAt - (epochBase + sent.t) : receipt.receivedAt - (epochBase + sent.t);
+        trace(`input-p${guest.port}-received`);
+        const latency = realMode ? receipt.receivedAt - sent.epoch : receipt.receivedAt - (epochBase + sent.t);
         latencies.push(Math.max(0, latency));
+        trace(`input-p${guest.port}-sample${sample + 1}`, `latencyMs=${latency.toFixed(1)}`);
         if (realMode) {
           const packets = decodeOSI1(await readFile(osiPath)).ports;
           const packet = packets[guest.port - 1];
@@ -144,6 +167,7 @@ async function runScenario(t) {
       return port.enabled === 0 && port.kind === 0;
     }, 500, 20);
     result.checks.disconnectNeutralization = "passed";
+    trace(`disconnect-p${reconnect.port}-neutral`);
     const reopened = await context.newPage();
     await reopened.goto(reconnect.url);
     await reopened.waitForFunction((useRealPage) => useRealPage ? window.__smashGuest?.state.connection === "Connected" : window.__smashGuest?.state.connected === true, realMode, { timeout: 12000 });
@@ -158,8 +182,9 @@ async function runScenario(t) {
       const record = state.ports[reconnect.port - 1];
       return state.receiptTimes.some((entry) => entry.port === reconnect.port && entry.t === sent.t) && record.enabled === 1 && record.buttons === reopenInput.buttons && record.sx === reopenInput.sx;
     }, 3000);
-    assert.equal((await reopened.evaluate(() => window.__smashGuest.state.port)), reconnect.port, "same link restores its assigned slot");
+    assert.equal((await reopened.evaluate(() => window.__smashGuest.state.slot ?? window.__smashGuest.state.port)), reconnect.port, "same link restores its assigned slot");
     result.checks.reconnectSameSlot = "passed";
+    trace(`reconnect-p${reconnect.port}-same-slot`);
     await reopened.close();
     result.finishedAt = new Date().toISOString();
     const reports = path.join(root, "harness/reports");
@@ -168,11 +193,11 @@ async function runScenario(t) {
     if (!realMode) await writeFile(path.join(reports, "e2e-sample.json"), `${JSON.stringify(result, null, 2)}\n`);
     return result;
   } finally {
-    await Promise.all(guests.map(({ page }) => page.close().catch(() => {})));
-    await context?.close();
-    await browser?.close();
-    await runtime?.close();
-    await real?.stop();
+    await boundedCleanup("browser-context", context?.close());
+    await boundedCleanup("browser-process", context?.browser()?.close());
+    await boundedCleanup("browser", browser?.close());
+    await boundedCleanup("mock-runtime", runtime?.close());
+    await boundedCleanup("real-processes", real?.stop());
     await rm(temp, { recursive: true, force: true });
     if (profileDir) await rm(profileDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   }

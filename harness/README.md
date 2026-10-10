@@ -5,11 +5,13 @@ The default `harness/e2e.test.js` run starts a local mock signaling service and 
 ```sh
 node --test harness/e2e.test.js
 SMASH_E2E_REAL=1 node --test harness/e2e.test.js
+SMASH_DEBUG=1 node server/index.js
+node harness/debug-handshake.mjs
 node harness/latency-probe.mjs --seconds 10 --label local
 node harness/latency-probe.mjs --url https://your-tunnel.example --seconds 30 --label tunnel
 ```
 
-Real mode starts `server/index.js` and `sidecar/index.js`, points `OPENSMASH_LAUNCHER_INPUT` at a temporary OSI1 file, and reads that file with `shared/protocol.js`'s `decodeOSI1`. It expects the real host and guest pages under `/host` and `/play`. The harness seeds `window.__SMASH_E2E_ROOM__ = { room, roomToken }` before the host scripts run so a test-created room can be used without putting its credential in the URL. The host should consume that seed only in the test harness flow; room credentials must not be logged.
+Real mode starts `server/index.js` and `sidecar/index.js` on ephemeral ports, points `OPENSMASH_LAUNCHER_INPUT` at a temporary OSI1 file, and reads that file with `shared/protocol.js`'s `decodeOSI1`. It waits for the sidecar's initial OSI1 snapshot before launching the browser. It expects the real host and guest pages under `/host` and `/play`. The harness seeds `window.__SMASH_E2E_ROOM__ = { room, roomToken }` before the host scripts run so a test-created room can be used without putting its credential in the URL. The host should consume that seed only in the test harness flow; room credentials must not be logged.
 
 ## Page hooks and media barcode
 
@@ -19,7 +21,7 @@ Lane C/D should expose these hooks for the harness and diagnostics:
 - Guest: `window.__smashGuest = { state, stats(), lastInput, setVirtualInput(input) }`. `state.connected` and `state.port` identify the live guest; `stats()` should include WebRTC stats records when available. `setVirtualInput` sends the supplied buttons and axes through the normal input path.
 - Host `?source=canvas` captures a deterministic canvas stream. Its top 12 pixel rows encode a 96-bit barcode: frame counter as uint32 big-endian, followed by the capture timestamp (`performance.timeOrigin + performance.now()`) as float64 big-endian. Each bit is black or white in one pixel, sampled across the first 96 pixels. The guest uses that timestamp and its local clock for the glass-to-glass estimate.
 
-These hooks are test/diagnostic seams, not protocol changes. If the lane implementations use a different stats shape, auth seed, or barcode encoding, reconcile them here and in the harness before enabling real-mode CI.
+These hooks are test/diagnostic seams, not protocol changes. `harness/debug-handshake.mjs` runs one real host and P2 guest, records browser console/page/network errors and safe server WS message metadata, and redacts guest/room credentials in URLs. `SMASH_DEBUG=1` logs WS direction, role, message type, port, and connection ID, never tokens or SDP. `?testHooks=1` exposes a host-side P1 port-1 input hook for the visible DW4 run. If the lane implementations use a different stats shape, auth seed, or barcode encoding, reconcile them here and in the harness before enabling real-mode CI.
 
 ## Latency metrics
 

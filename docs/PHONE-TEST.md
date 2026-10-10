@@ -1,4 +1,4 @@
-# Manual phone test (pending a passing real local loop)
+# Manual phone test (pending DW4 game-window proof and tunnel prep)
 
 This test is for Daniel after the host page is implemented and a quick tunnel is running. No public URL was started or tested in this phase.
 
@@ -8,4 +8,4 @@ This test is for Daniel after the host page is implemented and a quick tunnel is
 4. Open that link in the phone browser, allow playback if prompted, and confirm live game video appears.
 5. Ask the Mac player to start a VS match; use the phone's controls to move P2. Record whether video and input both work, then stop the tunnel and discard the old URL.
 
-Do not use this checklist until the local real host/guest loop passes. The quick-tunnel URL is temporary and may expose the app publicly while running.
+The local real host/guest signaling and input loop passes, but the visible game loop and tunnel prep are blocked at DW4. Do not use this checklist until those pass. The quick-tunnel URL is temporary and may expose the app publicly while running.

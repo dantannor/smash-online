@@ -1,4 +1,4 @@
-import { validateInputMessage } from "../shared/protocol.js";
+import { clampInputMessage, validateInputMessage } from "../shared/protocol.js";
 
 const STORAGE_KEY = "smash-host-room";
 const FALLBACK_ICE = [{ urls: "stun:stun.l.google.com:19302" }];
@@ -24,6 +24,7 @@ let lastGamepadState = null;
 let canvasFrame = 0;
 let canvasTimestamp = null;
 const rtcStats = new Map();
+const peerRtcStats = new Map();
 
 function status(message, error = false) {
   statusEl.textContent = message;
@@ -216,6 +217,7 @@ async function collectStats(port, peer) {
   if (!reports) return;
   let outbound = null;
   let remote = null;
+  peerRtcStats.set(port, [...reports.values()]);
   reports.forEach(report => {
     if (report.type === "outbound-rtp" && report.kind === "video" && !report.isRemote) outbound = report;
     if (report.type === "remote-inbound-rtp" && report.kind === "video") remote = report;
@@ -410,10 +412,32 @@ window.__smashHostStats = () => ({
   timestamp: canvasTimestamp,
   video: { frame: canvasFrame, timestamp: canvasTimestamp, captured: Boolean(stream?.getVideoTracks().length) },
   slots: Object.fromEntries([...statuses].map(([port, value]) => [port, { ...value }])),
-  peers: Object.fromEntries([...peers].map(([port, peer]) => [port, { state: peer.pc.connectionState, dataChannel: peer.channel?.readyState, rtcStats: rtcStats.get(port) || null }])),
+  peers: Object.fromEntries([...peers].map(([port, peer]) => [port, { state: peer.pc.connectionState, dataChannel: peer.channel?.readyState, rtcStats: peerRtcStats.get(port) || [], summary: rtcStats.get(port) || null }])),
+  rtcStats: [...peers.keys()].flatMap(port => (peerRtcStats.get(port) || []).map(report => ({ ...report, port }))),
   capturedTracks: stream?.getTracks().map(track => ({ kind: track.kind, readyState: track.readyState, contentHint: track.contentHint })) || [],
   source: sourceSelect.value,
 });
+if (query.get("testHooks") === "1") {
+  const p1ConnectionId = "smash-e2e-p1";
+  let p1Connected = false;
+  window.__smashHostSetP1Input = async (input) => {
+    const deadline = Date.now() + 3000;
+    while (sidecar?.readyState !== WebSocket.OPEN && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+    if (sidecar?.readyState !== WebSocket.OPEN) throw new Error("Sidecar is not connected");
+    if (!p1Connected) {
+      sendSidecar({ type: "slot:connect", port: 1, connectionId: p1ConnectionId });
+      p1Connected = true;
+    }
+    const packet = clampInputMessage({ seq: hostConnectionSequence++ >>> 0, t: performance.now(), ...input });
+    sendSidecar({ type: "slot:input", port: 1, connectionId: p1ConnectionId, input: packet });
+    return packet;
+  };
+  window.__smashHostDisconnectP1 = () => {
+    if (!p1Connected) return;
+    sendSidecar({ type: "slot:disconnect", port: 1, connectionId: p1ConnectionId });
+    p1Connected = false;
+  };
+}
 window.addEventListener("pagehide", () => {
   clearInterval(gamepadTimer);
   clearTimeout(sidecarRetry);

@@ -9,7 +9,7 @@ const params = new URLSearchParams(location.search);
 const room = params.get('room');
 const slotToken = params.get('slot');
 const keyState = new Set();
-const state = { connection: 'connecting', slot: null, controller: 'Keyboard', ping: null, fps: null, error: null };
+const state = { connection: 'connecting', connected: false, slot: null, port: null, controller: 'Keyboard', ping: null, fps: null, error: null };
 let peer, ws, dataChannel, stream;
 let reconnectTimer, reconnectDelay = 500, generation = 0, sequence = 0;
 let virtualInput = null;
@@ -20,6 +20,7 @@ let stopping = false;
 
 function setState(value, error = null) {
   state.connection = value;
+  state.connected = value === 'Connected';
   state.error = error;
   connection.textContent = error ? `${value}: ${error}` : value;
   connection.classList.toggle('error', Boolean(error));
@@ -85,7 +86,7 @@ async function connect() {
     if (ownGeneration !== generation) return;
     const port = Number(joined.port);
     if (![2, 3, 4].includes(port)) throw new Error('Join returned an invalid slot');
-    state.slot = port; slotLabel.textContent = `P${port}`;
+    state.slot = port; state.port = port; slotLabel.textContent = `P${port}`;
     const wsUrl = new URL('/ws', location.href);
     wsUrl.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     wsUrl.searchParams.set('room', room); wsUrl.searchParams.set('role', 'guest');
@@ -178,7 +179,7 @@ video.addEventListener('loadedmetadata', () => {
 document.querySelector('#sound').addEventListener('click', async () => { video.muted = false; try { await video.play(); } catch {} });
 document.querySelector('#fullscreen').addEventListener('click', async () => { const target = document.querySelector('#screen'); try { if (!document.fullscreenElement) await target.requestFullscreen(); else await document.exitFullscreen(); } catch {} });
 setInterval(() => sendInput(true), 1000 / 60);
-window.__smashGuest = { state, stats: () => ({ ...state }), get lastInput() { return { ...lastInput }; }, setVirtualInput };
+window.__smashGuest = { state, stats: async () => ({ ...state, rtcStats: peer ? [...(await peer.getStats()).values()] : [] }), get lastInput() { return { ...lastInput }; }, setVirtualInput };
 if (params.get('fakeInput') === 'script') {
   let tick = 0; setInterval(() => { tick++; setVirtualInput({ buttons: tick % 2 ? 0x8000 : 0, sx: tick % 2 ? 30 : -30, sy: 0 }); }, 500);
 }

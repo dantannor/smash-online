@@ -1,0 +1,16 @@
+{
+  "mode": "real",
+  "startedAt": "2026-10-10T21:06:17.738Z",
+  "latencyMs": {
+    "p50": 0.703857421875,
+    "p95": 1.659423828125,
+    "max": 1.659423828125,
+    "samples": 15
+  },
+  "checks": {
+    "inputRouting": "passed",
+    "disconnectNeutralization": "passed",
+    "reconnectSameSlot": "passed"
+  },
+  "finishedAt": "2026-10-10T21:06:18.893Z"
+}

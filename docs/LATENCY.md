@@ -1,14 +1,15 @@
 # Latency measurements
 
-## Available measurement
+## Real local input path
 
-The only valid measurement so far is the mock E2E harness, not a real WebRTC/G2G measurement. `harness/reports/e2e-sample.json` reports 15 mock input-routing samples: p50 **0.81 ms**, p95 **8.23 ms**, max **8.23 ms**. These numbers do not include encoding, network transport, video playback, or game response.
+`harness/reports/e2e-1791666378893.json` is the real server + sidecar + host + three-guest run. Across 15 input deliveries, latency was p50 **0.70 ms**, p95 **1.66 ms**, max **1.66 ms**. Each guest wrote only to its assigned OSI1 port; disconnect neutralized within 500 ms and the same link restored its slot.
+
+This measures guest input to OSI1 observation on one Mac. It is not video latency or a network test.
 
 ## Pending
 
-- Local real host + guest: pending. The guarded real harness opened the host page and canvas, then failed to complete guest connection and hit the 60-second Node test timeout. No real input-routing samples were produced.
-- Cloudflare tunnel real host + guest: pending until the local real loop passes; no tunnel was started.
-- `getStats()` RTT, jitterBufferDelay, FPS, dropped frames, and glass-to-glass barcode delay: pending. A real host capture page and barcode-bearing stream are required.
-- DW6 JSON evidence: pending; no real/tunnel latency JSON is claimed.
+- DW4 game-window capture did not start. `game/run-game.sh` failed while compiling the ScreenCaptureKit helper: `clang: error: no such file or directory: '\\'`. See `docs/evidence/dw4-report.json`.
+- Tunnel measurements and glass-to-glass are not run. The DW4 failure gate stopped the session before tunnel startup.
+- `getStats()` RTT, jitter buffer, FPS, dropped frames, and glass-to-glass through local display capture and tunnel remain pending.
 
-Once the host exists, run `node harness/latency-probe.mjs --seconds 10 --label local`, then start the tunnel and run `node harness/latency-probe.mjs --url https://<current-tunnel-url> --seconds 30 --label tunnel`. Keep the generated JSON reports alongside this document, and label the results by route.
+After fixing the literal backslash in the `swiftc` command in `game/run-game.sh`, run the DW4 loop first. Then run `node harness/latency-probe.mjs --seconds 10 --label local` against the live local host and `node harness/latency-probe.mjs --url https://<current-tunnel-url> --seconds 30 --label tunnel`. Keep the outputs separate and label each route.
