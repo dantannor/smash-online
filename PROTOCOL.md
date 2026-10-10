@@ -42,7 +42,7 @@ While any remote slot is connected, rewrite the complete OSI1 file at least ever
 ```sh
 ROM_PATH='/Users/danieltannor/Downloads/Super Smash Bros. (USA).z64'
 export OPENSMASH_LAUNCHER_INPUT='/tmp/smash-online-input.osi1'
-export SSB64_BOOT_SLOTS=0000
+export SSB64_BOOT_SLOTS=hhhh
 export SSB64_START_SCENE=16
 ```
 

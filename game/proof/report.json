@@ -1,0 +1,86 @@
+{
+  "generatedAt": "2026-10-10T15:52:22.775Z",
+  "processId": 66216,
+  "inputFile": "/tmp/smash-online-input.osi1",
+  "minimumPulseIntervalMs": 16,
+  "capturePolicy": "ScreenCaptureKit desktop-independent window capture first; fresh screencapture -l fallback; never capture screen regions",
+  "windowResolution": "fresh CGWindowList query before each screenshot, matching BattleShip owner, BattleShip (Metal), layer 0, largest bounds",
+  "screenshots": [
+    {
+      "screenshot": "/Users/danieltannor/.paseo/worktrees/2eyff34h/smash-online-a/game/proof/01-p1-up.png",
+      "windowId": 897,
+      "windowBounds": [
+        100,
+        68,
+        640,
+        512
+      ],
+      "port": "P1",
+      "portIndex": 0,
+      "direction": "up",
+      "expectedMovement": "P1 character-select cursor up",
+      "writes": 68,
+      "inputKind": 3,
+      "enabled": true,
+      "captureMethod": "ScreenCaptureKit",
+      "captureError": null
+    },
+    {
+      "screenshot": "/Users/danieltannor/.paseo/worktrees/2eyff34h/smash-online-a/game/proof/02-p2-right.png",
+      "windowId": 897,
+      "windowBounds": [
+        100,
+        68,
+        640,
+        512
+      ],
+      "port": "P2",
+      "portIndex": 1,
+      "direction": "right",
+      "expectedMovement": "P2 character-select cursor right",
+      "writes": 69,
+      "inputKind": 3,
+      "enabled": true,
+      "captureMethod": "ScreenCaptureKit",
+      "captureError": null
+    },
+    {
+      "screenshot": "/Users/danieltannor/.paseo/worktrees/2eyff34h/smash-online-a/game/proof/03-p3-down.png",
+      "windowId": 897,
+      "windowBounds": [
+        100,
+        68,
+        640,
+        512
+      ],
+      "port": "P3",
+      "portIndex": 2,
+      "direction": "down",
+      "expectedMovement": "P3 character-select cursor down",
+      "writes": 68,
+      "inputKind": 3,
+      "enabled": true,
+      "captureMethod": "ScreenCaptureKit",
+      "captureError": null
+    },
+    {
+      "screenshot": "/Users/danieltannor/.paseo/worktrees/2eyff34h/smash-online-a/game/proof/04-p4-left.png",
+      "windowId": 897,
+      "windowBounds": [
+        100,
+        68,
+        640,
+        512
+      ],
+      "port": "P4",
+      "portIndex": 3,
+      "direction": "left",
+      "expectedMovement": "P4 character-select cursor left",
+      "writes": 68,
+      "inputKind": 3,
+      "enabled": true,
+      "captureMethod": "ScreenCaptureKit",
+      "captureError": null
+    }
+  ]
+}
