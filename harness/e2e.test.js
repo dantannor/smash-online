@@ -82,6 +82,7 @@ async function runScenario(t) {
     const roomInfo = await create.json();
     const hostUrl = new URL(roomInfo.hostUrl);
     hostUrl.searchParams.set("source", "canvas");
+    if (!realMode) hostUrl.searchParams.set("dropFirstInput", "1");
     if (realMode) {
       profileDir = await mkdtemp("/tmp/smash-chromium-profile-");
       context = await chromium.launchPersistentContext(profileDir, { headless: true });
@@ -91,6 +92,7 @@ async function runScenario(t) {
     }
     const host = await context.newPage();
     if (realMode) await context.addInitScript(({ room, roomToken, sidecarUrl }) => { window.__SMASH_E2E_ROOM__ = { room, roomToken }; window.__SMASH_E2E_SIDECAR_URL__ = sidecarUrl; }, { room: roomInfo.room, roomToken: roomInfo.roomToken, sidecarUrl: real.sidecarUrl });
+    else await context.addInitScript((sidecarUrl) => { window.__SMASH_MOCK_SIDECAR_URL__ = sidecarUrl; }, runtime.sidecarUrl);
     await host.goto(hostUrl.toString());
     await host.waitForFunction(() => typeof window.__smashHostStats === "function", null, { timeout: 10000 });
     await host.waitForFunction(async () => (await window.__smashHostStats())?.frame > 10, null, { timeout: 10000 });
@@ -134,7 +136,7 @@ async function runScenario(t) {
             return packet.enabled && packet.buttons === input.buttons && packet.sx === input.sx && packet.sy === input.sy ? { receivedAt: performance.timeOrigin + performance.now() } : false;
           }
           const state = await fetch(`${origin}/mock/state`).then((response) => response.json());
-          return state.receiptTimes.find((entry) => entry.port === guest.port && entry.t === sent.t) ?? false;
+          return state.receiptTimes.find((entry) => entry.port === guest.port && entry.buttons === input.buttons && entry.sx === input.sx && entry.sy === input.sy) ?? false;
         }, 2500);
         trace(`input-p${guest.port}-received`);
         const latency = realMode ? receipt.receivedAt - sent.epoch : receipt.receivedAt - (epochBase + sent.t);
@@ -180,7 +182,7 @@ async function runScenario(t) {
       }
       const state = await fetch(`${origin}/mock/state`).then((response) => response.json());
       const record = state.ports[reconnect.port - 1];
-      return state.receiptTimes.some((entry) => entry.port === reconnect.port && entry.t === sent.t) && record.enabled === 1 && record.buttons === reopenInput.buttons && record.sx === reopenInput.sx;
+      return state.receiptTimes.some((entry) => entry.port === reconnect.port && entry.buttons === reopenInput.buttons && entry.sx === reopenInput.sx && entry.sy === reopenInput.sy) && record.enabled === 1 && record.buttons === reopenInput.buttons && record.sx === reopenInput.sx;
     }, 3000);
     assert.equal((await reopened.evaluate(() => window.__smashGuest.state.slot ?? window.__smashGuest.state.port)), reconnect.port, "same link restores its assigned slot");
     result.checks.reconnectSameSlot = "passed";

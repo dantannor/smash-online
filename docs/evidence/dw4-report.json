@@ -1,11 +1,104 @@
 {
-  "status": "blocked",
-  "startedAt": "2026-10-10T21:09:24.221Z",
-  "steps": [],
-  "screenshots": [],
-  "audio": null,
-  "error": "game/run-game.sh timed out waiting for BattleShip process and window. Stderr: clang: error: no such file or directory: '\\'.",
-  "bestNextOption": "Fix the stray literal backslash in the swiftc command continuation in game/run-game.sh, verify the ScreenCaptureKit helper builds, then rerun the DW4 visible loop. Stop here per the DW4 failure gate.",
-  "finishedAt": "2026-10-10T21:10:04.438Z",
-  "processesAfterCleanup": "none"
+  "status": "pass",
+  "startedAt": "2026-10-10T21:32:41.424Z",
+  "launcher": {
+    "swiftcLineContinuation": "single backslash",
+    "helperBuilt": true,
+    "helperPath": "~/Projects/smash-online-build/bin/sck-capture",
+    "windowedGame": true,
+    "windowId": 1485,
+    "windowBounds": [100, 68, 640, 512]
+  },
+  "steps": [
+    {
+      "name": "game-start",
+      "pass": true,
+      "gamePid": 31410
+    },
+    {
+      "name": "host-window-capture",
+      "pass": true,
+      "source": "BattleShip (Metal)",
+      "tracks": [
+        {
+          "kind": "video",
+          "readyState": "live",
+          "contentHint": "motion"
+        }
+      ]
+    },
+    {
+      "name": "guest-live-video",
+      "pass": true,
+      "port": 2,
+      "screenshot": "docs/evidence/dw4-guest-live.png"
+    },
+    {
+      "name": "vs-match",
+      "pass": true,
+      "p1": "P1 sidecar port 1 test hook, asserted against OSI1",
+      "p2": "guest P2 DataChannel input, asserted against OSI1"
+    },
+    {
+      "name": "p2-controlled-by-guest",
+      "pass": true,
+      "input": {
+        "sx": 80,
+        "durationMs": 1000
+      },
+      "gameScreenshot": "docs/evidence/dw4-p2-guest-input.png",
+      "guestScreenshot": "docs/evidence/dw4-guest-after-input.png"
+    }
+  ],
+  "screenshots": [
+    {
+      "file": "docs/evidence/dw4-initial.png",
+      "windowId": 1485,
+      "bounds": [
+        100,
+        68,
+        640,
+        512
+      ],
+      "method": "ScreenCaptureKit"
+    },
+    {
+      "file": "docs/evidence/dw4-character-select.png",
+      "windowId": 1485,
+      "bounds": [
+        100,
+        68,
+        640,
+        512
+      ],
+      "method": "ScreenCaptureKit"
+    },
+    {
+      "file": "docs/evidence/dw4-vs-match.png",
+      "windowId": 1485,
+      "bounds": [
+        100,
+        68,
+        640,
+        512
+      ],
+      "method": "ScreenCaptureKit"
+    },
+    {
+      "file": "docs/evidence/dw4-p2-guest-input.png",
+      "windowId": 1485,
+      "bounds": [
+        100,
+        68,
+        640,
+        512
+      ],
+      "method": "ScreenCaptureKit"
+    }
+  ],
+  "audio": {
+    "tracks": [],
+    "warning": "Connected to signaling. Waiting for guests."
+  },
+  "finishedAt": "2026-10-10T21:32:58.543Z"
 }

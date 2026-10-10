@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, rename, writeFile } from "node:fs/promises";
+import { mkdir, open, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { encodeOSI1, KINDS } from "../shared/protocol.js";
 
@@ -14,6 +14,16 @@ const ports = Array.from({ length: 4 }, (_, index) => ({
 const data = encodeOSI1({ seq: 0, mute: 0, ports });
 const temporary = `${target}.${process.pid}.${randomBytes(5).toString("hex")}.tmp`;
 await mkdir(dirname(target), { recursive: true });
-await writeFile(temporary, data, { mode: 0o600 });
-await rename(temporary, target);
+try {
+  const handle = await open(target, "r+");
+  try {
+    const { bytesWritten } = await handle.write(data, 0, data.length, 0);
+    if (bytesWritten !== data.length) throw new Error(`short OSI1 initialization write: ${bytesWritten}/${data.length} bytes`);
+    await handle.truncate(data.length);
+  } finally { await handle.close(); }
+} catch (error) {
+  if (error.code !== "ENOENT") throw error;
+  await writeFile(temporary, data, { mode: 0o600 });
+  await rename(temporary, target);
+}
 console.log(target);

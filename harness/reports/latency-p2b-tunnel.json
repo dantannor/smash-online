@@ -1,0 +1,36 @@
+{
+  "mode": "tunnel",
+  "url": "https://threats-runner-cruise-since.trycloudflare.com",
+  "label": "p2b-tunnel",
+  "seconds": 10,
+  "collectedAt": "2026-10-10T21:38:18.924Z",
+  "rttMs": {
+    "mean": 0.9743589743589743,
+    "samples": 39
+  },
+  "jitterBufferMs": {
+    "mean": 7.189937063720813,
+    "samples": 39
+  },
+  "framesPerSecond": {
+    "mean": 60.13157894736842,
+    "samples": 38
+  },
+  "framesDropped": {
+    "last": 0
+  },
+  "framesDecoded": {
+    "last": 593
+  },
+  "glassToGlassMs": {
+    "mean": 26.871732271634617,
+    "median": 26.7998046875,
+    "samples": 39
+  },
+  "peerStatsAvailable": true,
+  "guestVideo": {
+    "received": true,
+    "width": 640,
+    "height": 360
+  }
+}

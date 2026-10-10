@@ -1,4 +1,6 @@
-const room = new URL(location.href).searchParams.get("room");
+const pageParams = new URL(location.href).searchParams;
+const room = pageParams.get("room");
+let dropFirstActiveInput = pageParams.get("dropFirstInput") === "1";
 const canvas = document.querySelector("canvas");
 const ctx = canvas.getContext("2d");
 let frame = 0;
@@ -13,7 +15,7 @@ function draw() {
   frame++; requestAnimationFrame(draw);
 }
 requestAnimationFrame(draw);
-const sidecar = new WebSocket("ws://127.0.0.1:8765");
+const sidecar = new WebSocket(window.__SMASH_MOCK_SIDECAR_URL__ || "ws://127.0.0.1:8765");
 const socket = new WebSocket(`${location.origin.replace("http", "ws")}/ws?room=${room}&role=host&token=mock-room-token-00000000000000000001`);
 const peers = new Map();
 const sourceStream = canvas.captureStream(60);
@@ -33,6 +35,10 @@ socket.addEventListener("message", async (event) => {
     const channel = pc.createDataChannel("input", { ordered: false, maxRetransmits: 0 });
     channel.addEventListener("message", (ev) => {
       let input; try { input = JSON.parse(ev.data); } catch { return; }
+      if (dropFirstActiveInput && (input.buttons !== 0 || input.sx !== 0 || input.sy !== 0)) {
+        dropFirstActiveInput = false;
+        return;
+      }
       send({ type: "slot:input", port, connectionId, input });
     });
     await pc.setLocalDescription(await pc.createOffer());

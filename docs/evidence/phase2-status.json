@@ -1,39 +1,33 @@
 {
-  "status": "blocked",
-  "cause": "DW4 stopped at game launcher failure, before Chrome windows opened.",
+  "status": "verified-with-follow-ups",
+  "cause": "DW3 through DW6 passed. DW8 audio capture returned no BattleShip audio track. DW7 still needs Daniel's manual P1 controls check.",
   "debugHandshake": {
     "status": "PASS",
     "script": "harness/debug-handshake.mjs",
     "evidence": "docs/evidence/debug-handshake.json",
     "found404": "http://127.0.0.1:<ephemeral>/guest/guest.js",
-    "fix": "Guest entry now loads /play/guest.js; relative input-map and shared protocol imports resolve under the server's /play and /shared routes."
+    "fix": "Guest entry loads /play/guest.js; relative input-map and shared protocol imports resolve under /play and /shared."
   },
   "doneWhen": {
     "DW3": {"status": "PASS", "evidence": "docs/evidence/DW3-real-e2e.json", "inputSamples": 15, "p50Ms": 0.703857421875, "p95Ms": 1.659423828125, "maxMs": 1.659423828125, "disconnectNeutralMs": "within 500ms", "rejoinSameSlot": true},
-    "DW4": {"status": "BLOCKED", "evidence": "docs/evidence/dw4-report.json", "error": "clang: error: no such file or directory: '\\'"},
-    "DW5": {"status": "NOT RUN", "reason": "Stopped after the DW4 failure gate; no tunnel was started."},
-    "DW6": {"status": "PENDING", "evidence": "docs/LATENCY.md"},
+    "DW4": {"status": "PASS", "evidence": "docs/evidence/dw4-report.json", "windowedGame": true, "sckHelperBuild": true, "vsMatch": true, "hostCapture": "BattleShip (Metal), ScreenCaptureKit", "guestVideoScreenshot": "docs/evidence/dw4-guest-after-input.png", "p2InputScreenshot": "docs/evidence/dw4-p2-guest-input.png", "p1Method": "host sidecar test hook on P1, verified in OSI1", "p2Method": "guest WebRTC DataChannel"},
+    "DW5": {"status": "PASS", "evidence": "docs/evidence/dw5-tunnel.json", "publicHealthHttp": 200, "publicRoomCreateHttp": 201, "headlessGuestVideo": "640x360", "tunnelStopped": true},
+    "DW6": {"status": "PASS", "evidence": "docs/evidence/dw6-latency.json", "localGlassToGlassMeanMs": 25.820431440304485, "localGlassToGlassMedianMs": 27.5, "tunnelGlassToGlassMeanMs": 26.871732271634617, "tunnelGlassToGlassMedianMs": 26.7998046875, "samplesPerRoute": 39, "source": "synthetic host canvas over real signaling/WebRTC"},
     "DW7": {"status": "PENDING-DANIEL", "evidence": "game/README.md"},
-    "DW8": {"status": "PENDING", "reason": "DW4 did not reach display capture; canvas source audio is synthetic and does not prove game audio."}
+    "DW8": {"status": "NO_AUDIO_TRACK", "evidence": "docs/evidence/dw8-audio.json", "fix": "Implement ScreenCaptureKit audio capture to a browser AudioWorklet and add its MediaStreamDestination track to each guest peer. No virtual device install needed."}
   },
-  "otherEvidence": {
-    "realHarnessJson": "harness/reports/e2e-1791666378893.json",
-    "debugServerLogs": "docs/evidence/debug-handshake.json",
-    "mockLatencyMs": {"p50": 0.80908203125, "p95": 8.22705078125, "max": 8.22705078125}
-  },
-  "seamFixes": [
-    "In-place OSI1 updates now use one 80-byte write through a persistent descriptor; file length is fixed at startup only.",
-    "A 500ms input lapse neutralizes without disconnecting; explicit disconnect disables within the required bound.",
-    "Browser protocol helpers are free of Node crypto/Buffer APIs; token generation is node-only.",
-    "Host and guest handshake fields match the server relay; ICE candidate objects relay in both directions.",
-    "Server WS diagnostics log role, message type, port, and connection ID only, never credentials or SDP.",
-    "ROM deny list includes .v64 and .otr; browser tests use ephemeral ports and bounded cleanup."
+  "verifiedFixes": [
+    "game/run-game.sh now uses a single shell continuation for the swiftc helper build.",
+    "game/init-input.mjs writes an existing OSI1 file in place; sidecar and game keep reading the same inode.",
+    "Mock E2E runtime binds sidecar to an ephemeral port, closes WebSockets forcibly during teardown, and its test guest repeats input at 60Hz like the real guest.",
+    "The mock E2E deliberately drops the first active input to verify that the later repeat is delivered; input latency remains independently measured.",
+    "The glass-to-glass barcode now uses 4-pixel source bars and a scale-aware decoder so it survives browser video downscaling."
   ],
   "verification": {
-    "realHandshake": "PASS, one host and guest reached datachannel open; see debug-handshake.json",
-    "realDW3": "PASS, three guests route to OSI1, disconnect neutralizes, same link reconnects",
-    "npmTest": "Last run before this correction, 28/28; rerun is blocked by the DW4 stop gate.",
-    "pr7": "Merged at 83139e5cfca246e49c405ba02b84073770d49ca8, CI test job passed. Correction changes since that merge remain uncommitted.",
-    "runningProcesses": "none; game did not launch and no Chrome windows remain."
+    "npmTest": "PASS, 29/29 in the single local full-suite run; the final inode-size tweak then passed the focused init-input test. CI is the final full-suite gate.",
+    "previousMain": "PR #8 merged at 4733260c58ffbd5e8c9c104c98be367a636a4f02, CI passed.",
+    "previousStatusPr": "PR #9 closed without merge after CI exposed the mock E2E receipt timeout; root cause and regression test are fixed in this change.",
+    "currentChange": "Branch integrate-2; PR and merge SHA are in the completion report.",
+    "runningProcesses": "none; game, browser profiles, server, sidecar, and Cloudflare tunnel were stopped"
   }
 }

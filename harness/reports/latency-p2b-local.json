@@ -1,0 +1,36 @@
+{
+  "mode": "local",
+  "url": "http://127.0.0.1:8787",
+  "label": "p2b-local",
+  "seconds": 10,
+  "collectedAt": "2026-10-10T21:38:01.950Z",
+  "rttMs": {
+    "mean": 0,
+    "samples": 39
+  },
+  "jitterBufferMs": {
+    "mean": 6.929844662855412,
+    "samples": 39
+  },
+  "framesPerSecond": {
+    "mean": 60.23076923076923,
+    "samples": 39
+  },
+  "framesDropped": {
+    "last": 0
+  },
+  "framesDecoded": {
+    "last": 586
+  },
+  "glassToGlassMs": {
+    "mean": 25.820431440304485,
+    "median": 27.5,
+    "samples": 39
+  },
+  "peerStatsAvailable": true,
+  "guestVideo": {
+    "received": true,
+    "width": 640,
+    "height": 360
+  }
+}
