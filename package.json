@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "node server/index.js",
-    "test": "node --test $(find . -type f -name '*.test.js' -not -path './node_modules/*' -print)"
+    "test": "node --test --test-timeout=30000 $(find . -type f -name '*.test.js' -not -path './node_modules/*' -print)"
   },
   "devDependencies": {
     "playwright": "1.64.0",

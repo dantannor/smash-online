@@ -26,9 +26,9 @@ The command after `pad-helper:` runs as a shell command. It should write newline
 
 ## Behavior and contract notes
 
-- Every snapshot is encoded with `encodeOSI1` from `shared/protocol.js`, written to a unique temporary file in the target directory, then atomically renamed over the target. Mute is always 0 and reserved bytes remain zero.
+- Every snapshot is encoded with `encodeOSI1` from `shared/protocol.js` and written as one complete 80-byte update in place through the same open file descriptor. This preserves the file identity read by the game. Mute is always 0 and reserved bytes remain zero.
 - Snapshots refresh every 100 ms while running and immediately after state changes.
-- Disconnects neutralize and disable the port immediately. A guest that sends no input for 500 ms is also neutralized, disabled (kind 0), and reported as `slot:disconnected`. This follows the contract's statement that timeout neutralizes and disconnects the slot; it resolves the deliverable's enabled-state question by treating timeout as disconnect, not as a connected-but-neutral slot.
+- Explicit disconnects and peer closes neutralize and disable the port immediately. A guest that sends no input for 500 ms is neutralized but remains connected and enabled as kind 3; the next valid input resumes normally.
 - Reconnecting a port replaces its connection ID and starts neutral; messages from the replaced ID are rejected. Sequence numbers must strictly increase within a connection; wraparound is rejected, matching the contract's monotonic wording.
 - P1 kind 2 is enabled by default even before the host reports keyboard availability because the contract specifies an enabled default P1 keyboard source. P1 input over WebSocket changes to kind 3 while that source is connected; disconnect returns the port to kind 0.
 - Shutdown writes one final all-neutral snapshot. The process leaves that file in place for the launcher to read.

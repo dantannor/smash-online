@@ -1,4 +1,5 @@
 import { mapGamepad, mapKeyboard } from './input-map.js';
+import { clampInputMessage } from '../shared/protocol.js';
 
 const video = document.querySelector('#video');
 const hint = document.querySelector('#hint');
@@ -23,18 +24,12 @@ function setState(value, error = null) {
   connection.textContent = error ? `${value}: ${error}` : value;
   connection.classList.toggle('error', Boolean(error));
 }
-// Browser-safe equivalents of shared/protocol.js input helpers; that module imports node:crypto.
 function clampInput(value) {
-  if (!value || typeof value !== 'object') throw new TypeError('input must be an object');
-  const { buttons, sx, sy } = value;
-  if (![buttons, sx, sy].every(Number.isFinite)) throw new TypeError('buttons and stick axes must be finite');
-  return { buttons: Math.max(0, Math.min(0xffff, Math.trunc(buttons))), sx: Math.max(-80, Math.min(80, Math.trunc(sx))), sy: Math.max(-80, Math.min(80, Math.trunc(sy))) };
+  const { buttons, sx, sy } = clampInputMessage({ seq: 0, t: 0, ...value });
+  return { buttons, sx, sy };
 }
-function validInput(value) { try { clampInput(value); return true; } catch { return false; } }
 function encodeInput(value) {
-  if (!validInput(value)) throw new TypeError('invalid input');
-  const clean = clampInput(value);
-  return JSON.stringify({ seq: sequence = (sequence + 1) >>> 0, t: performance.now(), ...clean });
+  return JSON.stringify(clampInputMessage({ seq: sequence = (sequence + 1) >>> 0, t: performance.now(), ...value }));
 }
 function getInput() {
   if (virtualInput) return clampInput(virtualInput);

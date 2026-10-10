@@ -1,13 +1,6 @@
-const STORAGE_KEY = "smash-host-room";
+import { validateInputMessage } from "../shared/protocol.js";
 
-function validateInputMessage(input) {
-  return Boolean(input && typeof input === "object" && !Array.isArray(input)
-    && Number.isInteger(input.seq) && input.seq >= 0 && input.seq <= 0xffffffff
-    && Number.isFinite(input.t) && input.t >= 0
-    && Number.isInteger(input.buttons) && input.buttons >= 0 && input.buttons <= 0xffff
-    && Number.isInteger(input.sx) && input.sx >= -80 && input.sx <= 80
-    && Number.isInteger(input.sy) && input.sy >= -80 && input.sy <= 80);
-}
+const STORAGE_KEY = "smash-host-room";
 const FALLBACK_ICE = [{ urls: "stun:stun.l.google.com:19302" }];
 const statusEl = document.querySelector("#status");
 const linksEl = document.querySelector("#guest-links");

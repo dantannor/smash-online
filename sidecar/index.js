@@ -20,6 +20,7 @@ export class Sidecar {
     this.slots = Array.from({ length: 4 }, neutral);
     this.connections = Array(4).fill(null);
     this.helper = null;
+    this.fd = null;
     this.closed = false;
     this.p1Mode = p1 === "keyboard" ? "keyboard" : "pad-helper";
     this.p1Input = { buttons: 0, sx: 0, sy: 0 };
@@ -29,20 +30,19 @@ export class Sidecar {
   }
 
   writeSnapshot() {
-    if (this.closed || !fs.existsSync(path.dirname(this.file))) return;
+    if (this.closed || this.fd === null) return;
     const snapshot = encodeOSI1({ seq: this.seq++ >>> 0, mute: 0, ports: this.slots });
-    const temp = path.join(path.dirname(this.file), `.${path.basename(this.file)}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`);
     try {
-      fs.writeFileSync(temp, snapshot, { flag: "wx", mode: 0o600 });
-      fs.renameSync(temp, this.file);
-    } catch (error) {
-      try { fs.rmSync(temp, { force: true }); } catch {}
-      this.onError(error);
-    }
+      let offset = 0;
+      while (offset < snapshot.length) offset += fs.writeSync(this.fd, snapshot, offset, snapshot.length - offset, offset);
+      fs.ftruncateSync(this.fd, snapshot.length);
+    } catch (error) { this.onError(error); }
   }
 
   start() {
     fs.mkdirSync(path.dirname(this.file), { recursive: true });
+    try { this.fd = fs.openSync(this.file, "r+"); }
+    catch (error) { if (error.code !== "ENOENT") throw error; this.fd = fs.openSync(this.file, "w+", 0o600); }
     this.writeSnapshot();
     this.timer = setInterval(() => {
       this.writeSnapshot();
@@ -99,9 +99,8 @@ export class Sidecar {
       if (this.connections[index] !== connection) return;
       const elapsed = this.now() - connection.lastInputAt;
       if (elapsed < TIMEOUT_MS) return this.armTimeout(index, connection);
-      this.connections[index] = null;
-      this.slots[index] = neutral();
-      connection.client?.sendJson({ type: "slot:disconnected", port: index + 1 });
+      connection.timeout = null;
+      this.slots[index] = { ...neutral(), kind: KINDS.FILE_DRIVEN_PAD, enabled: 1 };
       this.writeSnapshot();
     }, remaining);
     connection.timeout.unref?.();
@@ -153,11 +152,17 @@ export class Sidecar {
     this.closed = false;
     this.writeSnapshot();
     this.closed = true;
+    if (this.fd !== null) { try { fs.closeSync(this.fd); } catch (error) { this.onError(error); } this.fd = null; }
     if (this.helper) {
       try {
+        if (this.helper.exitCode !== null || this.helper.signalCode !== null) return;
         if (process.platform !== "win32" && this.helper.pid) process.kill(-this.helper.pid, "SIGTERM");
         else this.helper.kill("SIGTERM");
-      } catch (error) { if (error.code !== "ESRCH") this.onError(error); }
+      } catch (error) {
+        if (error.code === "EPERM") {
+          try { this.helper.kill("SIGTERM"); } catch (fallbackError) { if (fallbackError.code !== "ESRCH") this.onError(fallbackError); }
+        } else if (error.code !== "ESRCH") this.onError(error);
+      }
     }
   }
 }

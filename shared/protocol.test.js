@@ -1,10 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  BUTTONS, KINDS, PORTS, clampInputMessage, createToken, decodeInputMessage,
+  BUTTONS, KINDS, PORTS, clampInputMessage, decodeInputMessage,
   decodeOSI1, encodeInputMessage, encodeOSI1, makeGuestUrl, makeRoomUrl,
   parseRoomUrl, validateInputMessage,
 } from "./protocol.js";
+import { createToken } from "./node-protocol.js";
 
 // Minimal golden bytes captured from opensmash/desktop/input.cjs createInput().update().
 // Source: https://github.com/turtlesoupy/opensmash/blob/main/desktop/input.cjs
@@ -25,7 +26,7 @@ test("OSI1 encoder matches byte-for-byte opensmash writer fixture", () => {
     { kind: 3, enabled: 0, buttons: 0xffff, sx: 80, sy: -80 },
   ] });
   assert.equal(packet.length, 80);
-  assert.equal(packet.toString("hex"), WRITER_FIXTURE_HEX);
+  assert.equal(Buffer.from(packet).toString("hex"), WRITER_FIXTURE_HEX);
 });
 
 test("OSI1 decoder round-trips the consumed port fields", () => {
