@@ -32,8 +32,9 @@
   "verification": {
     "realHandshake": "PASS, one host and guest reached datachannel open; see debug-handshake.json",
     "realDW3": "PASS, three guests route to OSI1, disconnect neutralizes, same link reconnects",
-    "npmTest": "Last run before this correction, 28/28; rerun is blocked by the DW4 stop gate.",
-    "pr7": "Merged at 83139e5cfca246e49c405ba02b84073770d49ca8, CI test job passed. Correction changes since that merge remain uncommitted.",
+    "npmTest": "PR #8 CI passed after this correction.",
+    "pr7": "Merged at 83139e5cfca246e49c405ba02b84073770d49ca8, CI passed.",
+    "pr8": "Merged at 4733260c58ffbd5e8c9c104c98be367a636a4f02, CI passed."
     "runningProcesses": "none; game did not launch and no Chrome windows remain."
   }
 }
