@@ -10,7 +10,7 @@ const TTL_MS = 30 * 60 * 1000;
 const PORTS = [2, 3, 4];
 const STUN = ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302"];
 const MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".ico": "image/x-icon", ".wasm": "application/wasm", ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf", ".otf": "font/otf", ".mp4": "video/mp4", ".webm": "video/webm", ".txt": "text/plain; charset=utf-8" };
-const ROM_EXT = new Set([".n64", ".z64", ".o2r"]);
+const ROM_EXT = new Set([".n64", ".z64", ".v64", ".o2r", ".otr"]);
 const hash = (token) => createHash("sha256").update(token).digest();
 const token = () => randomBytes(32).toString("base64url");
 const json = (res, status, data) => { res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" }); res.end(JSON.stringify(data)); };

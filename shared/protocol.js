@@ -1,5 +1,3 @@
-import { randomBytes } from "node:crypto";
-
 export const OSI1 = Object.freeze({ MAGIC: "OSI1", SIZE: 80, HEADER_SIZE: 8, PORT_SIZE: 16, PORTS: 4 });
 
 export const BUTTONS = Object.freeze({
@@ -43,7 +41,7 @@ export function encodeInputMessage(input) {
 
 export function decodeInputMessage(message) {
   let value;
-  try { value = typeof message === "string" ? JSON.parse(message) : JSON.parse(Buffer.from(message).toString("utf8")); }
+  try { value = typeof message === "string" ? JSON.parse(message) : JSON.parse(new TextDecoder().decode(message)); }
   catch { throw new TypeError("input message must be valid JSON"); }
   return clampInputMessage(value);
 }
@@ -69,31 +67,33 @@ export function encodeOSI1({ seq, mute = 0, ports }) {
   if (!Number.isInteger(seq) || seq < 0 || seq > UINT32_MAX) throw new RangeError("seq must be a uint32");
   if (mute !== 0 && mute !== 1 && mute !== false && mute !== true) throw new RangeError("mute must be boolean or 0/1");
   if (!Array.isArray(ports) || ports.length !== OSI1.PORTS) throw new RangeError("ports must contain exactly four entries");
-  const buffer = Buffer.alloc(OSI1.SIZE);
-  buffer.write(OSI1.MAGIC, 0, "ascii");
+  const buffer = new Uint8Array(OSI1.SIZE);
+  buffer.set(new TextEncoder().encode(OSI1.MAGIC), 0);
+  const view = new DataView(buffer.buffer);
   buffer[4] = Number(Boolean(mute));
   buffer[5] = seq & 0xff;
   ports.map(asPort).forEach((port, index) => {
     const offset = OSI1.HEADER_SIZE + OSI1.PORT_SIZE * index;
     buffer[offset] = port.kind;
     buffer[offset + 1] = port.enabled;
-    buffer.writeUInt16LE(port.buttons, offset + 2);
-    buffer.writeInt16LE(port.sx, offset + 4);
-    buffer.writeInt16LE(port.sy, offset + 6);
+    view.setUint16(offset + 2, port.buttons, true);
+    view.setInt16(offset + 4, port.sx, true);
+    view.setInt16(offset + 6, port.sy, true);
   });
   return buffer;
 }
 
 export function decodeOSI1(input) {
-  const buffer = Buffer.isBuffer(input) ? input : Buffer.from(input);
-  if (buffer.length !== OSI1.SIZE || buffer.toString("ascii", 0, 4) !== OSI1.MAGIC) throw new TypeError("invalid OSI1 buffer");
+  const buffer = input instanceof Uint8Array ? input : new Uint8Array(input);
+  const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+  if (buffer.length !== OSI1.SIZE || new TextDecoder().decode(buffer.subarray(0, 4)) !== OSI1.MAGIC) throw new TypeError("invalid OSI1 buffer");
   return {
     mute: buffer[4], seq: buffer[5],
     ports: Array.from({ length: OSI1.PORTS }, (_, index) => {
       const offset = OSI1.HEADER_SIZE + OSI1.PORT_SIZE * index;
       return {
         kind: buffer[offset], enabled: buffer[offset + 1],
-        buttons: buffer.readUInt16LE(offset + 2), sx: buffer.readInt16LE(offset + 4), sy: buffer.readInt16LE(offset + 6),
+        buttons: view.getUint16(offset + 2, true), sx: view.getInt16(offset + 4, true), sy: view.getInt16(offset + 6, true),
       };
     }),
   };
@@ -117,11 +117,6 @@ export function parseRoomUrl(value) {
   const room = url.searchParams.get("room");
   if (!room) throw new TypeError("URL is missing room");
   return { origin: url.origin, path: url.pathname, room };
-}
-
-export function createToken(bytes = 32) {
-  if (!Number.isInteger(bytes) || bytes < 16 || bytes > 64) throw new RangeError("token size must be 16..64 bytes");
-  return randomBytes(bytes).toString("base64url");
 }
 
 function requireTokenPart(value, label) {

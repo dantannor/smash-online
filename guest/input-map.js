@@ -1,8 +1,4 @@
-const BUTTONS = Object.freeze({
-  A: 0x8000, B: 0x4000, Z: 0x2000, START: 0x1000,
-  UP: 0x0800, DOWN: 0x0400, LEFT: 0x0200, RIGHT: 0x0100,
-  L: 0x0020, R: 0x0010, C_UP: 0x0008, C_DOWN: 0x0004, C_LEFT: 0x0002, C_RIGHT: 0x0001,
-});
+import { BUTTONS } from '../shared/protocol.js';
 const emptyInput = () => ({ buttons: 0, sx: 0, sy: 0 });
 const axisValue = (v, deadzone = 0.15) => {
   if (!Number.isFinite(v) || Math.abs(v) <= deadzone) return 0;

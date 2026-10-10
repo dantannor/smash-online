@@ -25,7 +25,7 @@ The signaling service listens on **HTTP/WebSocket port 8787**. REST endpoints an
 
 ## Guest input data channel
 
-Create one WebRTC `RTCDataChannel` per guest with `{ordered:false,maxRetransmits:0}` and a stable label `input`. Guest sends `{seq,t,buttons,sx,sy}` at 60 Hz and immediately on input change. `seq` is an unsigned 32-bit monotonically increasing counter per connection; `t` is the guest's `performance.now()` timestamp in milliseconds. `buttons` is a 16-bit mask; sticks are integer axes clamped to ±80. Drop stale/repeated sequence numbers; no retransmit or application-level queue. A slot timeout after 500 ms is neutralized and disconnected by the sidecar.
+Create one WebRTC `RTCDataChannel` per guest with `{ordered:false,maxRetransmits:0}` and a stable label `input`. Guest sends `{seq,t,buttons,sx,sy}` at 60 Hz and immediately on input change. `seq` is an unsigned 32-bit monotonically increasing counter per connection; `t` is the guest's `performance.now()` timestamp in milliseconds. `buttons` is a 16-bit mask; sticks are integer axes clamped to ±80. Drop stale/repeated sequence numbers; no retransmit or application-level queue. After 500 ms without input, the sidecar writes neutral input but keeps the slot connected and enabled; later valid input resumes it. Explicit `slot:disconnect` or peer close neutralizes and disables the slot.
 
 Buttons: A `0x8000`, B `0x4000`, Z `0x2000`, Start `0x1000`; D-pad U/D/L/R `0x0800/0x0400/0x0200/0x0100`; L `0x0020`, R `0x0010`; C U/D/L/R `0x0008/0x0004/0x0002/0x0001`.
 
@@ -48,7 +48,7 @@ export SSB64_START_SCENE=16
 
 OSI1 is exactly 80 bytes. Bytes 0–3 are ASCII `OSI1`; byte 4 is mute (`0` unmuted, `1` muted); byte 5 is a sequence byte that changes on every write; bytes 6–7 are zero. Four 16-byte port records start at `8 + 16*port` (port indices 0–3): kind at +0, enabled at +1, buttons uint16 LE at +2, stick X int16 LE at +4, stick Y int16 LE at +6. Stick values are approximately ±80. Bytes +8..+15 within each port record are not consumed by the SSB64 launcher input reader and remain reserved/zero in this protocol. Bytes 72–79 after the four records are also reserved and zero.
 
-Kinds: 2 game-window keyboard; 3 file-driven pad; other values disconnected. With `OPENSMASH_LAUNCHER_INPUT` enabled, all four ports are supplied by the file, including P1. Keep the file fresh at least every 100 ms while a remote slot is connected. If a held-input sequence is not advanced, the launcher clears file-driven pad inputs after 500 ms. All four records must be written atomically as one complete 80-byte snapshot.
+Kinds: 2 game-window keyboard; 3 file-driven pad; other values disconnected. With `OPENSMASH_LAUNCHER_INPUT` enabled, all four ports are supplied by the file, including P1. Keep the file fresh at least every 100 ms while a remote slot is connected. If a held-input sequence is not advanced, the launcher clears file-driven pad inputs after 500 ms. All four records are written in place to the existing file descriptor as one complete 80-byte snapshot, preserving the file identity held by the game.
 
 **Reference discrepancy:** `desktop/input.cjs` accepts a nine-number port tuple. It writes tuple elements 3–6 as two signed LE int16 axes, elements 7–8 at record offsets +12/+13, and leaves +14/+15 zero. The SSB64 reader only consumes the first eight bytes of each port record, so the extra two tuple values do not affect the OSI1 input contract. This Phase 0 contract reserves all eight trailing bytes as zero. The desktop writer advances the sequence byte once on each write and initializes byte 4 muted; Smash Online explicitly writes byte 4 as 0 unless mute is requested. The file reader's 500 ms stale-sequence timeout specifically disables kind-3 ports; it is not a general timeout for keyboard kind 2.
 
@@ -58,7 +58,7 @@ Capture at 60 fps. Set `MediaStreamTrack.contentHint = "motion"`. Prefer H.264 (
 
 ## Test hook
 
-Host `?source=canvas` selects deterministic canvas capture instead of the game window. The canvas shows a monotonically increasing frame counter so tests can verify capture and guest playback without a ROM or game process.
+Host `?source=canvas` selects deterministic canvas capture instead of the game window. The canvas shows a monotonically increasing frame counter so tests can verify capture and guest playback without a ROM or game process. Its media barcode is 96 bits sampled across the first 96 pixels in the top 12 pixel rows: a uint32 big-endian frame counter followed by a float64 big-endian capture timestamp (`performance.timeOrigin + performance.now()`).
 
 ## Reference implementation
 

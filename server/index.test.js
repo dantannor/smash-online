@@ -89,5 +89,5 @@ test("serves static pages safely and blocks ROMs and traversal", async (t) => {
   const host = await fetch(`${ctx.origin}/host`); assert.equal(host.status, 200); assert.match(host.headers.get("cache-control"), /no-cache/);
   assert.equal((await fetch(`${ctx.origin}/shared/protocol.js`)).status, 200);
   assert.equal((await fetch(`${ctx.origin}/shared/%2e%2e%2fPROTOCOL.md`)).status, 403);
-  for (const file of ["game.n64", "game.z64", "game.o2r"]) assert.equal((await fetch(`${ctx.origin}/shared/${file}`)).status, 403);
+  for (const file of ["game.n64", "game.z64", "game.v64", "game.o2r", "game.otr"]) assert.equal((await fetch(`${ctx.origin}/shared/${file}`)).status, 403);
 });

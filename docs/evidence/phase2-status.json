@@ -1,0 +1,39 @@
+{
+  "status": "blocked",
+  "blockingEvidence": {
+    "realHarnessCommand": "perl -e 'alarm 90; exec @ARGV' -- env SMASH_E2E_REAL=1 node --test --test-timeout=60000 harness/e2e.test.js",
+    "realHarnessResult": "FAIL: guest P2 never reached Connected. Focused run reported page.waitForFunction: Timeout 12000ms exceeded at harness/e2e.test.js:95. A separate run hit the 60000ms Node test timeout during cleanup.",
+    "observedProgress": ["real processes ready", "browser launched", "host canvas active", "guest P2 page loaded"],
+    "observedBrowserConsole": "One 404 resource error on guest P2; exact URL was not captured."
+  },
+  "completed": {
+    "seamFixes": [
+      "Sidecar keeps an open OSI1 file descriptor and updates the same 80-byte file in place.",
+      "500ms input timeout neutralizes but preserves enabled kind-3 connection; valid input resumes it. Explicit disconnect remains neutral and disabled.",
+      "Protocol helpers are browser-safe with token generation isolated in shared/node-protocol.js; host and guest use shared protocol helpers/constants.",
+      "PROTOCOL.md and harness docs agree on the 96-bit barcode in the first 96 pixels across 12 rows.",
+      "Server ROM deny list includes .v64 and .otr.",
+      "Server and harness real-mode ports are ephemeral; npm test has a 30-second per-test timeout; sidecar helper cleanup has an EPERM fallback.",
+      "Integrated host lane C from origin/lane-c-host into the integrate worktree."
+    ],
+    "focusedTests": "PASS: 22/22 host, mock harness, sidecar, protocol, and server tests.",
+    "fullSuite": "PASS: npm test, 28/28.",
+    "mockE2E": {"p50Ms": 0.80908203125, "p95Ms": 8.22705078125, "maxMs": 8.22705078125, "samples": 15, "report": "harness/reports/e2e-sample.json"}
+  },
+  "doneWhen": {
+    "DW3": {"status": "BLOCKED", "evidence": "realHarnessResult"},
+    "DW4": {"status": "PENDING", "reason": "real guest connection did not complete; no game or visible windows launched"},
+    "DW5": {"status": "PENDING", "reason": "tunnel not started; local real loop is not passing"},
+    "DW6": {"status": "PENDING", "evidence": "docs/LATENCY.md"},
+    "DW7": {"status": "PENDING-DANIEL", "evidence": "game/README.md; manual P1 check not performed"},
+    "DW8": {"status": "PENDING", "reason": "no real display capture/audio test; proposed follow-up is a separate ScreenCaptureKit audio track if Chrome window capture is silent"}
+  },
+  "pending": ["DW3 real input latencies, disconnect/rejoin proof", "DW4 visible game/host/guest proof", "DW5 public tunnel + remote guest video", "DW6 local/tunnel latency probe and glass-to-glass", "DW7 manual P1 control check; gamepad P1 path unverified", "DW8 macOS game-audio test and exact implementation decision"],
+  "commands": [
+    {"command": "perl -e 'alarm 90; exec @ARGV' -- node --test --test-timeout=30000 sidecar/index.test.js shared/protocol.test.js server/index.test.js", "result": "PASS, 20/20"},
+    {"command": "perl -e 'alarm 80; exec @ARGV' -- node --test --test-timeout=30000 host/host.test.js harness/e2e.test.js sidecar/index.test.js shared/protocol.test.js server/index.test.js", "result": "PASS for all subtests except mock harness predicate during an intermediate edit; fixed and rerun: host + mock harness 2/2 PASS"},
+    {"command": "perl -e 'alarm 150; exec @ARGV' -- npm test", "result": "PASS, 28/28"},
+    {"command": "perl -e 'alarm 45; exec @ARGV' -- env SMASH_E2E_REAL=1 node --test --test-timeout=30000 harness/e2e.test.js", "result": "BLOCKED, guest P2 did not report Connected within 12 seconds; separate attempt timed out at 60 seconds"}
+  ],
+  "runningProcesses": "none"
+}
