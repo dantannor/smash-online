@@ -1,0 +1,16 @@
+{
+  "name": "smash-online",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test $(find . -type f -name '*.test.js' -not -path './node_modules/*' -print)"
+  },
+  "devDependencies": {
+    "playwright": "1.64.0",
+    "ws": "8.22.0"
+  }
+}

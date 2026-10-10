@@ -1,0 +1,11 @@
+node_modules/
+.pstack/
+roms/
+*.n64
+*.z64
+*.v64
+*.o2r
+*.otr
+build*/
+test-results/
+screenshots-tmp/
