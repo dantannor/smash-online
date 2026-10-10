@@ -15,11 +15,19 @@ socket.addEventListener("message", async (event) => {
   if (message.type === "offer") { await pc.setRemoteDescription(message.sdp); await pc.setLocalDescription(await pc.createAnswer()); socket.send(JSON.stringify({ type: "answer", sdp: pc.localDescription })); }
   else if (message.type === "ice" && message.candidate) await pc.addIceCandidate(message.candidate);
 });
-function setVirtualInput(input) {
-  const packet = { seq: seq++ >>> 0, t: performance.now(), buttons: 0, sx: 0, sy: 0, ...input };
+let virtualInput = { buttons: 0, sx: 0, sy: 0 };
+function sendInput(input) {
+  const packet = { seq: seq++ >>> 0, t: performance.now(), ...input };
   stats.lastInputSentAt = performance.timeOrigin + packet.t;
-  if (channel?.readyState === "open") channel.send(JSON.stringify(packet));
+  if (channel?.readyState === "open") {
+    try { channel.send(JSON.stringify(packet)); } catch { /* channel may close between readiness check and send */ }
+  }
   return packet;
 }
+function setVirtualInput(input) {
+  virtualInput = { buttons: input.buttons, sx: input.sx, sy: input.sy };
+  return sendInput(virtualInput);
+}
+setInterval(() => { if (channel?.readyState === "open") sendInput(virtualInput); }, 1000 / 60);
 window.__smashGuest = { state, stats: async () => ({ ...stats, rtcStats: [...(await pc.getStats()).values()] }), get lastInput() { return stats.lastInputSentAt; }, setVirtualInput };
 window.addEventListener("pagehide", () => { try { socket.close(); } catch {} try { pc.close(); } catch {} });

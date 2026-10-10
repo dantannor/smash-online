@@ -17,6 +17,8 @@ The generated native executable uses the ROM-derived `.o2r` assets made during b
 
 While the OSI1 file is active, P1 defaults to kind 2, BattleShip window keyboard input. Keep the game window focused and use **W/A/S/D** (or arrows) to move, **J** A, **K** B, **L** Z, **Space/Return** Start, **I/O** L/R, and **T/G/F/H/U** for D-pad down/up/left/right and C-up. These are SDL keyboard-state reads from the game window. No synthetic key event was sent, because doing so could steal focus; Daniel should verify the mapping manually in VS character select.
 
+The visible DW4 automation drives P1 through the host `?testHooks=1` hook, which sends port-1 input through the loopback sidecar and verifies OSI1. Normal play still uses the focused game's W/A/S/D or arrow keys and J/K/L controls above; no synthetic keyboard event is sent by the harness. Daniel still needs to check that mapping manually.
+
 A physical pad needs a separate native reader because the active OSI1 file supplies all four ports and kind 2 intentionally selects keyboard state. Lane B should implement an optional local pad helper (SDL GameController API is a suitable native source) that emits JSON Lines on stdout:
 
 ```json

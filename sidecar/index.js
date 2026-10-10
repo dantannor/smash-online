@@ -185,6 +185,7 @@ export function createSidecarServer(sidecar, { port = 8765, host = "127.0.0.1" }
       try { message = JSON.parse(raw.toString()); }
       catch { sidecar.reject(client, "malformed_json", "message must be valid JSON"); return; }
       if (!message || typeof message !== "object" || Array.isArray(message)) return sidecar.reject(client, "invalid_message", "message must be an object");
+      if (process.env.SMASH_DEBUG === "1") console.log(`[sidecar] type=${message.type} port=${Number.isInteger(message.port) ? message.port : "invalid"}`);
       if (message.type === "slot:connect") sidecar.connect(message.port, message.connectionId, client);
       else if (message.type === "slot:input") sidecar.input(message.port, message.connectionId, message.input, client);
       else if (message.type === "slot:disconnect") sidecar.disconnect(message.port, message.connectionId, client);

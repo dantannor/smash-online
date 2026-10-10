@@ -8,6 +8,7 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { resolveCurrentWindow, captureCurrentWindow } from "../game/proof-inputs.mjs";
+import { decodeOSI1 } from "../shared/protocol.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const evidenceDir = path.join(root, "docs/evidence");
@@ -18,6 +19,7 @@ let hostProfile;
 let guestProfile;
 let temp;
 let gamePid = null;
+let inputFile;
 const report = { status: "blocked", startedAt: new Date().toISOString(), steps: [], screenshots: [], audio: null };
 
 function port() {
@@ -60,17 +62,34 @@ async function captureGame(name) {
   report.screenshots.push({ file: path.relative(root, file), windowId: window.windowId, bounds: window.bounds, method: capture.captureMethod });
   return window;
 }
-async function p1(buttons, durationMs = 250) {
-  await hostPage.evaluate((mask) => window.__smashHostSetP1Input({ buttons: mask, sx: 0, sy: 0 }), buttons);
+async function waitForOSI(port, expected, description) {
+  let lastPacket = null;
+  try {
+    await waitFor(async () => {
+      try {
+        lastPacket = decodeOSI1(await readFile(inputFile)).ports[port - 1];
+        return lastPacket.enabled === 1 && Object.entries(expected).every(([key, value]) => lastPacket[key] === value);
+      } catch { return false; }
+    }, description, 5000);
+  } catch (error) {
+    throw new Error(`${error.message}; expected=${JSON.stringify(expected)} port=${port} last=${JSON.stringify(lastPacket)}`);
+  }
+}
+async function p1(input, durationMs = 400) {
+  const active = { buttons: 0, sx: 0, sy: 0, ...input };
+  const result = await hostPage.evaluate((value) => window.__smashHostSetP1Input(value), active);
+  console.log(`[DW4] P1 hook sent ${JSON.stringify(result)}`);
+  await waitForOSI(1, active, "P1 sidecar input in OSI1");
   await delay(durationMs);
   await hostPage.evaluate(() => window.__smashHostSetP1Input({ buttons: 0, sx: 0, sy: 0 }));
+  await waitForOSI(1, { buttons: 0, sx: 0, sy: 0 }, "P1 neutral input in OSI1");
 }
 let hostPage;
 
 try {
   await mkdir(evidenceDir, { recursive: true });
   temp = await mkdtemp(path.join(tmpdir(), "smash-dw4-"));
-  const inputFile = path.join(temp, "input.osi1");
+  inputFile = path.join(temp, "input.osi1");
   const [serverPort, sidecarPort] = await Promise.all([port(), port()]);
   const origin = `http://127.0.0.1:${serverPort}`;
 
@@ -117,19 +136,36 @@ try {
   await guestPage.screenshot({ path: path.join(evidenceDir, "dw4-guest-live.png"), fullPage: true });
   report.steps.push({ name: "guest-live-video", pass: true, port: await guestPage.evaluate(() => window.__smashGuest.state.port), screenshot: "docs/evidence/dw4-guest-live.png" });
 
-  // Advance both P1 and P2 through character selection and stage selection.
-  await p1(0x8000);
-  await guestPage.evaluate(() => window.__smashGuest.setVirtualInput({ buttons: 0x8000, sx: 0, sy: 0 }));
-  await delay(300);
+  // Move both player cursors from their panels to the character grid, then confirm fighters.
+  await p1({ sy: 80 });
+  await guestPage.evaluate(() => window.__smashGuest.setVirtualInput({ buttons: 0, sx: 0, sy: 80 }));
+  await waitForOSI(2, { buttons: 0, sx: 0, sy: 80 }, "guest P2 cursor input in OSI1");
+  await delay(400);
   await guestPage.evaluate(() => window.__smashGuest.setVirtualInput({ buttons: 0, sx: 0, sy: 0 }));
+  await waitForOSI(2, { buttons: 0, sx: 0, sy: 0 }, "guest P2 neutral input in OSI1");
   await captureGame("dw4-character-select.png");
-  await p1(0x1000);
-  await guestPage.evaluate(() => window.__smashGuest.setVirtualInput({ buttons: 0x1000, sx: 0, sy: 0 }));
-  await delay(300);
+  await p1({ buttons: 0x8000 });
+  await guestPage.evaluate(() => window.__smashGuest.setVirtualInput({ buttons: 0x8000, sx: 0, sy: 0 }));
+  await waitForOSI(2, { buttons: 0x8000, sx: 0, sy: 0 }, "guest P2 confirm in OSI1");
+  await delay(500);
   await guestPage.evaluate(() => window.__smashGuest.setVirtualInput({ buttons: 0, sx: 0, sy: 0 }));
-  await delay(1500);
+  await waitForOSI(2, { buttons: 0, sx: 0, sy: 0 }, "guest P2 neutral after confirm");
+  await p1({ buttons: 0x1000 });
+  await guestPage.evaluate(() => window.__smashGuest.setVirtualInput({ buttons: 0x1000, sx: 0, sy: 0 }));
+  await waitForOSI(2, { buttons: 0x1000, sx: 0, sy: 0 }, "guest P2 stage confirmation in OSI1");
+  await delay(500);
+  await guestPage.evaluate(() => window.__smashGuest.setVirtualInput({ buttons: 0, sx: 0, sy: 0 }));
+  await waitForOSI(2, { buttons: 0, sx: 0, sy: 0 }, "guest P2 neutral after stage confirmation");
+  // Confirm the stage selection, then wait for the VS fight screen to load.
+  await p1({ buttons: 0x8000 });
+  await guestPage.evaluate(() => window.__smashGuest.setVirtualInput({ buttons: 0x8000, sx: 0, sy: 0 }));
+  await waitForOSI(2, { buttons: 0x8000, sx: 0, sy: 0 }, "guest P2 stage selection in OSI1");
+  await delay(500);
+  await guestPage.evaluate(() => window.__smashGuest.setVirtualInput({ buttons: 0, sx: 0, sy: 0 }));
+  await waitForOSI(2, { buttons: 0, sx: 0, sy: 0 }, "guest P2 neutral after stage selection");
+  await delay(3000);
   await captureGame("dw4-vs-match.png");
-  report.steps.push({ name: "vs-match", pass: true, p1: "P1 sidecar port 1 test hook", p2: "guest P2 DataChannel input" });
+  report.steps.push({ name: "vs-match", pass: true, p1: "P1 sidecar port 1 test hook, asserted against OSI1", p2: "guest P2 DataChannel input, asserted against OSI1" });
 
   await guestPage.evaluate(() => window.__smashGuest.setVirtualInput({ buttons: 0, sx: 80, sy: 0 }));
   await delay(1000);
@@ -147,7 +183,7 @@ try {
   await guestContext?.close().catch((error) => console.error(`[cleanup-guest] ${error.message}`));
   await hostContext?.close().catch((error) => console.error(`[cleanup-host] ${error.message}`));
   for (const child of children) if (child.exitCode === null) child.kill("SIGTERM");
-  if (gamePid && !children.at(-1)?.killed) { try { process.kill(gamePid, "SIGTERM"); } catch {} }
+  if (gamePid) { try { process.kill(gamePid, "SIGTERM"); } catch {} }
   await Promise.all(children.map((child) => child.exitCode !== null ? Promise.resolve() : new Promise((resolve) => child.once("exit", resolve))));
   if (guestProfile) await rm(guestProfile, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   if (hostProfile) await rm(hostProfile, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });

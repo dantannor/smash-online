@@ -19,7 +19,7 @@ export SSB64_START_SCENE=16
 node "$ROOT/game/configure-window.mjs" "$GAME_DIR/BattleShip.cfg.json"
 mkdir -p "$BUILD_ROOT/bin"
 if [[ ! -x "$BUILD_ROOT/bin/sck-capture" || "$ROOT/game/capture/sck-capture.swift" -nt "$BUILD_ROOT/bin/sck-capture" ]]; then
-  swiftc -parse-as-library -O -framework AppKit -framework ScreenCaptureKit \\
+  swiftc -parse-as-library -O -framework AppKit -framework ScreenCaptureKit \
     -o "$BUILD_ROOT/bin/sck-capture" "$ROOT/game/capture/sck-capture.swift"
 fi
 node "$ROOT/game/init-input.mjs"

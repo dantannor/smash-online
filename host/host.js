@@ -273,7 +273,7 @@ function startCanvasCapture() {
     for (let bit = 0; bit < 96; bit++) {
       const byte = barcode.getUint8(bit >>> 3);
       context.fillStyle = byte & (1 << (7 - (bit & 7))) ? "#fff" : "#000";
-      context.fillRect(bit, 0, 1, 12);
+      context.fillRect(bit * 4, 0, 4, 12);
     }
     context.fillStyle = "#42e8a4"; context.font = "bold 80px monospace"; context.fillText(`FRAME ${frame}`, 70, 160);
     context.fillStyle = "#fff"; context.font = "30px monospace"; context.fillText(`${timestamp.toFixed(2)} ms epoch`, 70, 230);

@@ -73,7 +73,12 @@ export async function startMockRuntime() {
   const address = server.address();
   origin = `http://127.0.0.1:${address.port}`;
   const wss = new WebSocketServer({ server, path: "/ws" });
-  const sidecar = new WebSocketServer({ host: "127.0.0.1", port: 8765 });
+  const sidecar = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  await new Promise((resolve, reject) => {
+    sidecar.once("listening", resolve);
+    sidecar.once("error", reject);
+  });
+  const sidecarUrl = `ws://127.0.0.1:${sidecar.address().port}`;
   sidecar.on("connection", (ws) => {
     ws.send(JSON.stringify({ type: "ready" }));
     ws.on("message", (raw) => {
@@ -134,7 +139,7 @@ export async function startMockRuntime() {
     const normalized = clampInputMessage(input);
     const index = PORTS[`P${port}`];
     state.ports[index] = { kind: KINDS.FILE_DRIVEN_PAD, enabled: 1, ...normalized };
-    state.receiptTimes.push({ port, t: normalized.t, receivedAt: performance.timeOrigin + performance.now() });
+    state.receiptTimes.push({ port, t: normalized.t, buttons: normalized.buttons, sx: normalized.sx, sy: normalized.sy, receivedAt: performance.timeOrigin + performance.now() });
     if (state.receiptTimes.length > 1000) state.receiptTimes.splice(0, state.receiptTimes.length - 1000);
   };
   state.disconnect = (port, connectionId) => {
@@ -148,12 +153,18 @@ export async function startMockRuntime() {
       else state.seq = (state.seq + 1) >>> 0;
     }
   }, 75);
+  let closed = false;
   const close = async () => {
+    if (closed) return;
+    closed = true;
     clearInterval(freshness);
-    for (const ws of wss.clients) ws.close();
-    for (const ws of sidecar.clients) ws.close();
-    await new Promise((resolve) => sidecar.close(resolve));
-    await new Promise((resolve) => server.close(resolve));
+    for (const ws of wss.clients) ws.terminate();
+    for (const ws of sidecar.clients) ws.terminate();
+    await Promise.all([
+      new Promise((resolve) => wss.close(resolve)),
+      new Promise((resolve) => sidecar.close(resolve)),
+    ]);
+    await new Promise((resolve) => server.listening ? server.close(resolve) : resolve());
   };
-  return { origin, server, wss, state, slots, close };
+  return { origin, server, wss, sidecar, sidecarUrl, state, slots, close };
 }

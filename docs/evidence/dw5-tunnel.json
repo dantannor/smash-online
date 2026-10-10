@@ -1,0 +1,24 @@
+{
+  "status": "PASS",
+  "tunnel": {
+    "type": "Cloudflare Quick Tunnel",
+    "url": "https://threats-runner-cruise-since.trycloudflare.com",
+    "healthHttp": 200,
+    "roomCreateHttp": 201,
+    "roomSlots": [2, 3, 4]
+  },
+  "guest": {
+    "mode": "headless Playwright Chromium",
+    "userDataDir": "fresh temporary directory under /tmp, removed after run",
+    "connected": true,
+    "videoReceived": true,
+    "videoSize": "640x360",
+    "mediaSource": "generated host canvas, not the game window",
+    "latencyEvidence": "docs/evidence/dw6-latency.json"
+  },
+  "cleanup": {
+    "tunnelStopped": true,
+    "postStopHealthHttp": 530,
+    "note": "Cloudflare edge returned its tunnel-unavailable page after the cloudflared process exited; local server and sidecar were stopped separately after the probes."
+  }
+}

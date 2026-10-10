@@ -1,0 +1,34 @@
+{
+  "status": "PASS",
+  "measurement": "real signaling/WebRTC transport with the host canvas barcode source; not game capture",
+  "glassToGlassDefinition": "Guest video presentation time minus the timestamp decoded from the host canvas barcode. Synthetic-source estimate, not game-frame or player-perceived latency.",
+  "mediaPathNote": "The quick tunnel carries HTTP/WebSocket signaling. WebRTC media negotiated a direct peer path on this same Mac, so tunnel glass-to-glass is not a Cloudflare-relayed media measurement.",
+  "local": {
+    "mode": "local",
+    "url": "http://127.0.0.1:8787",
+    "label": "p2b-local",
+    "seconds": 10,
+    "collectedAt": "2026-10-10T21:38:01.950Z",
+    "rttMs": { "mean": 0, "samples": 39 },
+    "jitterBufferMs": { "mean": 6.929844662855412, "samples": 39 },
+    "framesPerSecond": { "mean": 60.23076923076923, "samples": 39 },
+    "framesDropped": { "last": 0 },
+    "framesDecoded": { "last": 586 },
+    "glassToGlassMs": { "mean": 25.820431440304485, "median": 27.5, "samples": 39 },
+    "guestVideo": { "received": true, "width": 640, "height": 360 }
+  },
+  "tunnel": {
+    "mode": "tunnel",
+    "url": "https://threats-runner-cruise-since.trycloudflare.com",
+    "label": "p2b-tunnel",
+    "seconds": 10,
+    "collectedAt": "2026-10-10T21:38:18.924Z",
+    "rttMs": { "mean": 0.9743589743589743, "samples": 39 },
+    "jitterBufferMs": { "mean": 7.189937063720813, "samples": 39 },
+    "framesPerSecond": { "mean": 60.13157894736842, "samples": 38 },
+    "framesDropped": { "last": 0 },
+    "framesDecoded": { "last": 593 },
+    "glassToGlassMs": { "mean": 26.871732271634617, "median": 26.7998046875, "samples": 39 },
+    "guestVideo": { "received": true, "width": 640, "height": 360 }
+  }
+}

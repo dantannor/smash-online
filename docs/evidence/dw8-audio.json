@@ -1,0 +1,18 @@
+{
+  "status": "NO_AUDIO_TRACK",
+  "test": "Visible DW4 Chrome display capture of the BattleShip (Metal) window; host stream tracks inspected and guest page received live video.",
+  "hostCapturedTracks": [
+    { "kind": "video", "readyState": "live", "contentHint": "motion" }
+  ],
+  "hostAudioTracks": 0,
+  "guestAudio": "Not delivered: the host MediaStream contained no audio track to send.",
+  "noInstallFixImplemented": false,
+  "reason": "Chrome getDisplayMedia requested audio/systemAudio, but the tested macOS display/window capture returned video only. A synthetic canvas oscillator is not evidence of BattleShip audio. Installing a virtual audio device is outside the no-install constraint.",
+  "exactNoInstallFix": [
+    "Extend the native ScreenCaptureKit helper to run an SCStream with capturesAudio enabled, 48 kHz stereo PCM, and an audio SCStreamOutput callback.",
+    "Forward timestamped PCM only over a loopback IPC channel to the host page; keep sample buffers out of logs and disk.",
+    "Feed the PCM into a browser AudioWorklet, render it to a MediaStreamAudioDestinationNode, and add that audio track to each guest RTCPeerConnection alongside the existing video track.",
+    "Expose guest mute/unmute, measure A/V offset with a test tone and video timestamp, and verify system audio capture permission on this macOS version."
+  ],
+  "evidence": "docs/evidence/dw4-report.json"
+}
