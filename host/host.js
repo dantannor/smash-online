@@ -430,19 +430,41 @@ const p1Keys = new Set();
 let p1Connected = false;
 let lastP1Sent = 0;
 const p1Toggle = document.querySelector("#p1-toggle");
-const typing = target => ["INPUT", "SELECT", "TEXTAREA"].includes(target?.tagName);
-window.addEventListener("keydown", event => { if (!typing(event.target) && !event.metaKey && !event.ctrlKey) { p1Keys.add(event.key); if (p1Toggle.checked && event.key.startsWith("Arrow")) event.preventDefault(); } });
-window.addEventListener("keyup", event => p1Keys.delete(event.key));
-window.addEventListener("blur", () => p1Keys.clear());
+const p1Live = document.querySelector("#p1-live");
+const GAME_CODES = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space", "Enter", "NumpadEnter"]);
+// Layout-independent: event.code is the physical key, so a Hebrew/other layout still maps WASD/JKL.
+const keyForCode = code => /^Key[A-Z]$/.test(code) ? code.slice(3).toLowerCase() : code === "Space" || code === "NumpadEnter" ? "Enter" : code.startsWith("Arrow") || code === "Enter" ? code : null;
+const textField = target => target?.tagName === "TEXTAREA" || (target?.tagName === "INPUT" && !["checkbox", "radio", "button"].includes(target.type) && !target.readOnly);
+window.addEventListener("keydown", event => {
+  if (!p1Toggle.checked || textField(event.target) || event.metaKey || event.ctrlKey || event.altKey) return;
+  const key = keyForCode(event.code);
+  if (!key) return;
+  if (GAME_CODES.has(event.code) || /^Key[WASDJKLQEUNHI]$/.test(event.code)) event.preventDefault();
+  p1Keys.add(event.code);
+  pollGamepad();
+});
+window.addEventListener("keyup", event => { p1Keys.delete(event.code); pollGamepad(); });
+window.addEventListener("blur", () => { p1Keys.clear(); pollGamepad(); });
+p1Toggle.addEventListener("click", () => p1Toggle.blur());
+document.addEventListener("click", event => { if (event.target.matches?.("button, input[type=checkbox], select")) setTimeout(() => event.target.blur?.(), 0); });
+
+const BUTTON_NAMES = [[0x8000, "A"], [0x4000, "B"], [0x2000, "Z"], [0x1000, "Start"], [0x20, "L"], [0x10, "R"], [0x800, "Up"], [0x400, "Down"], [0x200, "Left"], [0x100, "Right"], [0x8, "C-up"]];
+function renderP1(input) {
+  if (!p1Live) return;
+  const names = BUTTON_NAMES.filter(([mask]) => input.buttons & mask).map(([, name]) => name);
+  const focus = document.hasFocus() ? "" : " | click this page so keys register";
+  p1Live.textContent = `P1 ${p1Connected ? "connected" : "waiting for sidecar"} | stick ${input.sx},${input.sy} | buttons ${names.join("+") || "none"}${focus}`;
+}
 
 function pollGamepad() {
   if (!p1Toggle.checked) { lastGamepadState = null; return; }
   const pad = [...(navigator.getGamepads?.() || [])].find(Boolean);
-  const keys = mapKeyboard(p1Keys);
+  const keys = mapKeyboard(new Set([...p1Keys].map(keyForCode)));
   const padInput = pad ? mapGamepad(pad) : { buttons: 0, sx: 0, sy: 0 };
   if (!p1Connected && sidecar?.readyState === WebSocket.OPEN) { sendSidecar({ type: "slot:connect", port: 1, connectionId: "host-p1" }); p1Connected = true; lastGamepadState = null; }
-  if (!p1Connected) return;
+  if (!p1Connected) { renderP1({ buttons: 0, sx: 0, sy: 0 }); return; }
   const merged = { buttons: padInput.buttons | keys.buttons, sx: padInput.sx || keys.sx, sy: padInput.sy || keys.sy };
+  renderP1(merged);
   const now = performance.now();
   const changed = !lastGamepadState || merged.buttons !== lastGamepadState.buttons || merged.sx !== lastGamepadState.sx || merged.sy !== lastGamepadState.sy;
   // The sidecar neutralizes a kind-3 port after 500 ms of silence, so held input needs a keep-alive.

@@ -198,6 +198,13 @@ test("host page plays P1 from the keyboard through the sidecar, with keep-alive"
     assert.ok(messages.some(m => m.type === "slot:connect" && m.port === 1));
     await page.keyboard.up("d"); await page.keyboard.up("j");
     await page.waitForTimeout(300);
+    // Focus on the checkbox (after clicking it) and a non-Latin layout must not block P1.
+    await page.locator("#p1-toggle").click(); await page.locator("#p1-toggle").click();
+    await page.evaluate(() => { for (const [key, code] of [["ד", "KeyD"], [" ", "Space"]]) window.dispatchEvent(new KeyboardEvent("keydown", { key, code, bubbles: true, cancelable: true })); });
+    await page.waitForFunction(() => { const l = window.__smashHostP1().last; return l.sx === 80 && (l.buttons & 0x1000) === 0x1000; });
+    assert.match(await page.locator("#p1-live").textContent(), /stick 80,0 \| buttons Start/);
+    await page.evaluate(() => { for (const code of ["KeyD", "Space"]) window.dispatchEvent(new KeyboardEvent("keyup", { code, bubbles: true })); });
+    await page.waitForFunction(() => window.__smashHostP1().last.sx === 0);
     assert.deepEqual(await page.evaluate(() => { const { buttons, sx, sy } = window.__smashHostP1().last; return { buttons, sx, sy }; }), { buttons: 0, sx: 0, sy: 0 });
   } finally { await browser.close(); sidecar.close(); server.close(); }
 });
