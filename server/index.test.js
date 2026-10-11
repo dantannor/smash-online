@@ -84,6 +84,36 @@ test("expires rooms after 30 minutes of inactivity", async (t) => {
   assert.equal(response.status, 404);
 });
 
+test("keeps a room alive while any socket is connected", async (t) => {
+  let time = 1000;
+  const ctx = await setup({ now: () => time }); t.after(ctx.close);
+  const room = await createRoom(ctx.origin);
+  const host = await opened(connect(ctx.origin, { room: room.room, role: "host", token: room.roomToken }));
+  time += 2 * 60 * 60 * 1000;
+  const join = () => fetch(`${ctx.origin}/api/rooms/${room.room}/join`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ slotToken: room.slots[0].slotToken }) });
+  assert.equal((await join()).status, 200);
+  await closeSocket(host);
+  time += 30 * 60 * 1000;
+  assert.equal((await join()).status, 404);
+});
+
+test("tells an expired-room websocket the room is gone", async (t) => {
+  const ctx = await setup(); t.after(ctx.close);
+  const host = connect(ctx.origin, { room: "missing", role: "host", token: "x" });
+  assert.equal((await nextMessage(host)).code, "ROOM_NOT_FOUND");
+});
+
+test("replays already-connected guests to a host that connects later", async (t) => {
+  const ctx = await setup(); t.after(ctx.close);
+  const room = await createRoom(ctx.origin);
+  const guest = await opened(connect(ctx.origin, { room: room.room, role: "guest", port: 3, token: room.slots[1].slotToken }));
+  const host = connect(ctx.origin, { room: room.room, role: "host", token: room.roomToken });
+  const replayed = await nextMessage(host);
+  assert.equal(replayed.type, "slot:connected"); assert.equal(replayed.port, 3);
+  assert.ok(replayed.connectionId);
+  await closeSocket(guest); await closeSocket(host);
+});
+
 test("serves static pages safely and blocks ROMs and traversal", async (t) => {
   const ctx = await setup(); t.after(ctx.close);
   const host = await fetch(`${ctx.origin}/host`); assert.equal(host.status, 200); assert.match(host.headers.get("cache-control"), /no-cache/);

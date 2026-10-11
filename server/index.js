@@ -21,7 +21,7 @@ export function createApplication({ now = Date.now } = {}) {
   const connections = new WeakMap();
   function sweep() {
     const time = now();
-    for (const [id, room] of rooms) if (time - room.lastActivity >= TTL_MS) {
+    for (const [id, room] of rooms) if (time - room.lastActivity >= TTL_MS && !hasOpenSocket(room)) {
       for (const socket of [room.host, ...Object.values(room.slots).map((slot) => slot.socket)]) if (socket?.readyState === WebSocket.OPEN) socket.close(1001, "room expired");
       rooms.delete(id);
     }
@@ -75,12 +75,14 @@ export function createApplication({ now = Date.now } = {}) {
     let authorized = false;
     if (room && role === "host") authorized = equal(room.tokenHash, hash(supplied));
     if (room && role === "guest" && PORTS.includes(port)) authorized = equal(room.slots[port].tokenHash, hash(supplied));
-    if (!authorized) { sendError(ws, "UNAUTHORIZED", "Invalid room credentials"); ws.close(1008, "unauthorized"); return; }
+    if (!authorized) { sendError(ws, room ? "UNAUTHORIZED" : "ROOM_NOT_FOUND", room ? "Invalid room credentials" : "Room not found or expired"); ws.close(1008, "unauthorized"); return; }
     room.lastActivity = now();
     let connectionId;
     if (role === "host") {
       if (room.host?.readyState === WebSocket.OPEN) room.host.close(4001, "host replaced");
       room.host = ws;
+      // Guests that connected while the host was away (restart, reconnect gap) would otherwise never get an offer.
+      for (const [slotPort, slot] of Object.entries(room.slots)) if (slot.socket?.readyState === WebSocket.OPEN) send(ws, { type: "slot:connected", port: Number(slotPort), connectionId: slot.connectionId });
     } else {
       const slot = room.slots[port];
       if (slot.socket?.readyState === WebSocket.OPEN) slot.socket.close(4001, "slot replaced");
@@ -130,6 +132,7 @@ export function createApplication({ now = Date.now } = {}) {
   return { server, wss, rooms, close: () => new Promise((resolveClose) => server.close(resolveClose)) };
 }
 
+function hasOpenSocket(room) { return [room.host, ...Object.values(room.slots).map((slot) => slot.socket)].some((socket) => socket?.readyState === WebSocket.OPEN); }
 function equal(expected, actual) { return expected.length === actual.length && timingSafeEqual(expected, actual); }
 function send(ws, data) {
   if (ws?.readyState !== WebSocket.OPEN) return;
