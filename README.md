@@ -8,7 +8,7 @@ Local Smash 64 streaming/input prototype with a native game, OSI1 sidecar, signa
 2. Start `./game/run-game.sh`. It opens BattleShip windowed at VS character select and builds `sck-capture` when needed.
 3. Start the sidecar in another terminal: `node sidecar/index.js --file /tmp/smash-online-input.osi1 --port 8765`.
 4. Start signaling with `npm start` (port 8787).
-5. Open `http://localhost:8787/host`, keep Capture source set to **Game window / screen**, click **Create room**, then share each guest's own link. The sidecar stays on the host Mac at loopback.
+5. Open `http://localhost:8787/host`, keep Capture source set to **Game window / screen**, click **Create room**, then click **Start capture** and share each guest's own link. If capture ends, click **Resume capture**; existing guests stay connected. The sidecar stays on the host Mac at loopback.
 6. For a temporary remote link, run `./server/tunnel.sh` and share the P2 link. Stop the tunnel when the session ends. It carries signaling only; WebRTC media tries a direct peer connection using public STUN, with no TURN relay.
 
 To stop a detached session started under `/tmp/smash-live`, run `./scripts/stop-live.sh`.

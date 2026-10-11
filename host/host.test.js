@@ -10,7 +10,7 @@ import path from "node:path";
 const hostDir = path.dirname(fileURLToPath(import.meta.url));
 const repoDir = path.resolve(hostDir, "..");
 
-test("host room links, canvas capture, and guest input forwarding", { timeout: 50_000 }, async t => {
+test("host room links, canvas capture recovery, and guest input forwarding", { timeout: 50_000 }, async t => {
   let roomServer, sidecarServer, browser;
   const clients = new Set();
   const sidecarMessages = [];
@@ -41,12 +41,22 @@ test("host room links, canvas capture, and guest input forwarding", { timeout: 5
     const signalWss = new WebSocketServer({ noServer: true });
     roomServer.on("upgrade", (request, socket, head) => signalWss.handleUpgrade(request, socket, head, ws => signalWss.emit("connection", ws, request)));
     signalWss.on("connection", (ws, request) => {
-      clients.add(ws); ws.on("close", () => clients.delete(ws));
-      if (!hostSocket) hostSocket = ws;
-      else {
+      const role = new URL(request.url, `http://${request.headers.host}`).searchParams.get("role");
+      clients.add(ws);
+      ws.on("close", () => {
+        clients.delete(ws);
+        if (ws === hostSocket) hostSocket = null;
+        if (ws === guestSocket) guestSocket = null;
+      });
+      if (role === "host") {
+        hostSocket = ws;
+        if (guestSocket?.readyState === WebSocket.OPEN) hostSocket.send(JSON.stringify({ type: "slot:connected", port: 2, connectionId }));
+      } else {
         guestSocket = ws;
-        hostSocket.send(JSON.stringify({ type: "slot:connected", port: 2, connectionId }));
-        if (pendingOffer) guestSocket.send(JSON.stringify(pendingOffer));
+        if (hostSocket?.readyState === WebSocket.OPEN) {
+          hostSocket.send(JSON.stringify({ type: "slot:connected", port: 2, connectionId }));
+          if (pendingOffer) guestSocket.send(JSON.stringify(pendingOffer));
+        }
       }
       ws.on("message", raw => {
         const message = JSON.parse(raw.toString());
@@ -71,6 +81,7 @@ test("host room links, canvas capture, and guest input forwarding", { timeout: 5
     await hostPage.getByRole("heading", { name: "P2" }).waitFor({ timeout: 10_000 });
     assert.equal(await hostPage.locator("#guest-links article").count(), 3);
     assert.match(await hostPage.locator('input[aria-label="P2 guest link"]').inputValue(), /slot=slottoken2/);
+    await hostPage.getByRole("button", { name: "Start capture" }).click();
     await hostPage.waitForFunction(() => window.__smashHostStats?.().capturedTracks.some(track => track.kind === "video" && track.readyState === "live"), null, { timeout: 10_000 });
 
     const guestPage = await context.newPage();
@@ -78,8 +89,9 @@ test("host room links, canvas capture, and guest input forwarding", { timeout: 5
     await guestPage.goto(`http://127.0.0.1:${roomServer.address().port}/host?guest=1`, { timeout: 15_000 });
     await guestPage.evaluate(() => {
       window.guestTrackReceived = false;
+      window.guestVideoTrack = null;
       window.guestPc = new RTCPeerConnection({ iceServers: [] });
-      window.guestPc.addEventListener("track", event => { if (event.track.kind === "video") window.guestTrackReceived = true; });
+      window.guestPc.addEventListener("track", event => { if (event.track.kind === "video") { window.guestTrackReceived = true; window.guestVideoTrack = event.track; } });
       window.guestPc.addEventListener("datachannel", event => {
         window.guestChannel = event.channel;
         event.channel.addEventListener("open", () => event.channel.send(JSON.stringify({ seq: 1, t: 4.5, buttons: 32768, sx: 10, sy: -10 })));
@@ -111,6 +123,44 @@ test("host room links, canvas capture, and guest input forwarding", { timeout: 5
     assert.equal(input.input.sx, 10);
     assert.equal(input.input.sy, -10);
     assert.equal(input.connectionId, connectionId);
+
+    const originalTrackId = await hostPage.evaluate(() => document.querySelector("#preview").srcObject.getVideoTracks()[0].id);
+    await hostPage.evaluate(() => {
+      const track = document.querySelector("#preview").srcObject.getVideoTracks()[0];
+      track.stop();
+      track.dispatchEvent(new Event("ended"));
+    });
+    const resumeButton = hostPage.getByRole("button", { name: "Resume capture" });
+    await resumeButton.waitFor({ state: "visible" });
+    assert.equal(await resumeButton.isEnabled(), true, "capture recovery button is enabled");
+    await resumeButton.click();
+    await hostPage.waitForFunction(originalTrackId => {
+      const stats = window.__smashHostStats();
+      return stats.video.captured && stats.peers[2]?.videoTrackId && stats.peers[2].videoTrackId !== originalTrackId && stats.peers[2].dataChannel === "open";
+    }, originalTrackId, { timeout: 10_000 });
+    const replacement = await hostPage.evaluate(() => ({
+      captureTrackId: document.querySelector("#preview").srcObject.getVideoTracks()[0].id,
+      senderTrackId: window.__smashHostStats().peers[2].videoTrackId,
+    }));
+    assert.equal(replacement.senderTrackId, replacement.captureTrackId, "existing peer sender uses the replacement capture track");
+    assert.equal(await guestPage.evaluate(() => guestPc.connectionState), "connected", "guest stays connected during capture recovery");
+
+    const beforeReload = await hostPage.evaluate(() => ({
+      room: JSON.parse(sessionStorage.getItem("smash-host-room")).room,
+      p2: document.querySelector('input[aria-label="P2 guest link"]').value,
+    }));
+    await guestPage.close();
+    await hostPage.reload();
+    const startCaptureButton = hostPage.getByRole("button", { name: "Start capture" });
+    await startCaptureButton.waitFor({ state: "visible" });
+    assert.equal(await startCaptureButton.isEnabled(), true);
+    const afterReload = await hostPage.evaluate(() => ({
+      room: window.__smashHostStats().room,
+      p2: document.querySelector('input[aria-label="P2 guest link"]').value,
+    }));
+    assert.equal(afterReload.room, beforeReload.room, "reload reattaches to the existing room");
+    assert.equal(afterReload.p2, beforeReload.p2, "reload preserves guest links");
+    await hostPage.waitForFunction(() => window.__smashHostStats().signalingState === WebSocket.OPEN, null, { timeout: 10_000 });
     await context.close();
   } finally {
     await browser?.close().catch(() => {});
