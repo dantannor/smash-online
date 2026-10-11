@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import net from "node:net";
+import { spawn } from "node:child_process";
 import WebSocket from "ws";
 import { Sidecar, createSidecarServer } from "./index.js";
 import { decodeOSI1, encodeOSI1, KINDS } from "../shared/protocol.js";
@@ -176,4 +178,33 @@ test("mute byte is 0 by default, 1 with mute, and toggles over the WebSocket", a
   await sleep(50);
   assert.equal(decodeOSI1(fs.readFileSync(file)).mute, 0);
   ws.close();
+});
+
+test("SIGTERM exits promptly with a neutral final packet while a host websocket is connected", async (t) => {
+  const { file } = fixture(t);
+  const free = await new Promise((resolve) => { const s = net.createServer().listen(0, "127.0.0.1", () => { const { port } = s.address(); s.close(() => resolve(port)); }); });
+  const child = spawn(process.execPath, [path.join(import.meta.dirname, "index.js"), "--file", file, "--port", String(free), "--mute"], { stdio: ["ignore", "pipe", "inherit"] });
+  t.after(() => child.kill("SIGKILL"));
+  let out = "";
+  const port = await new Promise((resolve, reject) => {
+    child.stdout.on("data", (chunk) => { out += chunk; const m = out.match(/ws:\/\/127\.0\.0\.1:(\d+)/); if (m) resolve(Number(m[1])); });
+    child.once("exit", () => reject(new Error("sidecar exited early")));
+  });
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+  t.after(() => ws.terminate());
+  await new Promise((resolve, reject) => { ws.once("message", resolve); ws.once("error", reject); });
+  ws.send(JSON.stringify({ type: "slot:connect", port: 2, connectionId: "c1" }));
+  await sleep(250);
+  assert.equal(decodeOSI1(fs.readFileSync(file)).ports[1].enabled, 1);
+  const exited = new Promise((resolve) => child.once("exit", (code, signal) => resolve({ code, signal })));
+  const started = Date.now();
+  child.kill("SIGTERM");
+  const result = await Promise.race([exited, sleep(1500).then(() => "timeout")]);
+  assert.notEqual(result, "timeout", "sidecar ignored SIGTERM");
+  assert.deepEqual(result, { code: 0, signal: null });
+  assert.ok(Date.now() - started < 1500);
+  const final = decodeOSI1(fs.readFileSync(file));
+  for (const p of final.ports) {
+    assert.deepEqual(p, { kind: KINDS.DISCONNECTED, enabled: 0, buttons: 0, sx: 0, sy: 0 });
+  }
 });
