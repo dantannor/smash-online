@@ -43,3 +43,11 @@ The macOS BattleShip window capture produced a video track and no audio track. G
 - Measured (2026-10-11, live game window captured by the local host page in Worker mode, headless Chromium P3 guest, 30 s window): with `?relay=1` the selected pair was relay/udp on both ends (Cloudflare TURN), RTT about 10 ms, 57.5 fps average (min 56), 0 to 1 packets lost, no reconnects; P3 stick and A reached port 2 and the P3 cursor moved in the real game. Without forcing relay the same-machine guest picked host/host (RTT 0, 57.4 fps), which says nothing about friends; this Wi-Fi has symmetric NAT and blocked Google STUN, so remote friends depend on the relay path.
 - The host tab must be foreground for `getDisplayMedia` (Chrome refuses it on a backgrounded page with `InvalidStateError`).
 - Tests: `node --test cloud/worker.test.js` (starts `wrangler dev --local`).
+
+## Custom fighters (opensmash roster)
+
+The game can show opensmash's custom fighters (smash.fun catalog, ~1000 total) on extra character-select pages, next to the 12 vanilla ones.
+
+1. `scripts/stage-roster.sh` downloads and hash-verifies the first 40 catalog fighters (Donald Trump, Obama, etc.) into `~/Projects/smash-online-build/roster/` (about 100 MB, never committed). `SMASH_ROSTER_COUNT=N` or `SMASH_ROSTER_SLUGS=a,b,c` change the set.
+2. `scripts/start.sh` picks it up automatically (`game/run-game.sh` sets `SSB64_ROSTER_FILE` and starts on page 1). `SMASH_ROSTER=vanilla` disables it; with no staged roster it falls back to vanilla.
+3. On the select screen, switch pages with L/R (guest keyboard Q/E) or move the hand cursor to the left/right screen edge. Page 0 is the vanilla 12; pages 1+ are 12 custom fighters each.
