@@ -125,15 +125,19 @@ launch() {
 }
 
 export OPENSMASH_LAUNCHER_INPUT="$INPUT_FILE"
+export SMASH_RUN_DIR="$RUN_DIR" SMASH_SIDECAR_PORT="$SIDECAR_PORT"
+# Restart the game when it exits (engine aborts after a few hours); SMASH_WATCHDOG=0 disables.
+WATCHDOG=()
+[[ "${SMASH_WATCHDOG:-1}" != 0 ]] && WATCHDOG=("$ROOT/scripts/game-watchdog.sh")
 export PATH="$PATH"
 cd "$ROOT"
 
 echo "Starting game..."
 if [[ -n "${SMASH_GAME_CMD:-}" ]]; then
-  launch game bash -c "$SMASH_GAME_CMD"
+  launch game "${WATCHDOG[@]}" bash -c "$SMASH_GAME_CMD"
   wait_for "OSI1 input file $INPUT_FILE" "$GAME_TIMEOUT" test -s "$INPUT_FILE"
 else
-  launch game "$ROOT/game/run-game.sh"
+  launch game "${WATCHDOG[@]}" "$ROOT/game/run-game.sh"
   # run-game.sh creates the file before the game opens it; the window_id line means the game is up and holds it.
   wait_for "game window" "$GAME_TIMEOUT" grep -q '^window_id=' "$RUN_DIR/game.log"
   wait_for "OSI1 input file $INPUT_FILE" 10 test -s "$INPUT_FILE"
