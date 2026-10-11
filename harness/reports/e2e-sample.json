@@ -1,10 +1,10 @@
 {
   "mode": "mock",
-  "startedAt": "2026-10-11T08:26:42.614Z",
+  "startedAt": "2026-10-11T08:32:00.234Z",
   "latencyMs": {
-    "p50": 0.66748046875,
-    "p95": 9.182861328125,
-    "max": 9.182861328125,
+    "p50": 0.7109375,
+    "p95": 14.791015625,
+    "max": 14.791015625,
     "samples": 15
   },
   "checks": {
@@ -12,5 +12,5 @@
     "disconnectNeutralization": "passed",
     "reconnectSameSlot": "passed"
   },
-  "finishedAt": "2026-10-11T08:26:43.938Z"
+  "finishedAt": "2026-10-11T08:32:01.570Z"
 }
