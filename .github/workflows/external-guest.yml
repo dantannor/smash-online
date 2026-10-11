@@ -1,0 +1,110 @@
+name: External guest proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      guest_url:
+        description: P2/P3/P4 guest link for the active Worker room
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  external-guest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Mask guest link
+        env:
+          GUEST_URL: ${{ inputs.guest_url }}
+        run: echo "::add-mask::$GUEST_URL"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Run remote guest proof
+        env:
+          GUEST_URL: ${{ inputs.guest_url }}
+        run: |
+          echo "::add-mask::$GUEST_URL"
+          node --input-type=module <<'NODE'
+          import { chromium } from 'playwright';
+          import fs from 'node:fs/promises';
+
+          const guestUrl = process.env.GUEST_URL;
+          if (!guestUrl) throw new Error('guest_url input is required');
+          await fs.mkdir('external-guest-artifacts', { recursive: true });
+          const browser = await chromium.launch({
+            headless: true,
+            args: ['--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required'],
+          });
+          const page = await browser.newPage({ viewport: { width: 1280, height: 960 } });
+          try {
+            await page.goto(guestUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+            await page.waitForFunction(() => {
+              const video = document.querySelector('#video');
+              if (document.querySelector('#connection')?.textContent.trim() !== 'Connected' ||
+                  !video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return false;
+              const frames = video.getVideoPlaybackQuality?.().totalVideoFrames ?? video.webkitDecodedFrameCount ?? 0;
+              if (frames < 1 || !video.videoWidth || !video.videoHeight) return false;
+              const canvas = document.createElement('canvas');
+              canvas.width = 32; canvas.height = 32;
+              const context = canvas.getContext('2d', { willReadFrequently: true });
+              context.drawImage(video, 0, 0, canvas.width, canvas.height);
+              const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+              let nonBlack = 0;
+              for (let i = 0; i < pixels.length; i += 4) {
+                if (pixels[i] > 16 || pixels[i + 1] > 16 || pixels[i + 2] > 16) nonBlack++;
+              }
+              return nonBlack > pixels.length / 16;
+            }, { timeout: 60000, polling: 250 });
+
+            await page.screenshot({ path: 'external-guest-artifacts/screenshot.png' });
+            const before = await page.evaluate(async () => {
+              const reports = [...(await window.__smashGuest.stats()).rtcStats];
+              const inbound = reports.find(item => item.type === 'inbound-rtp' && item.kind === 'video');
+              return { frames: inbound?.framesDecoded ?? 0, at: performance.now() };
+            });
+            await page.evaluate(() => window.__smashGuest.setVirtualInput({ buttons: 0x8000, sx: 30, sy: 0 }));
+            await page.waitForTimeout(5000);
+            await page.evaluate(() => window.__smashGuest.setVirtualInput({ buttons: 0, sx: 0, sy: 0 }));
+            const result = await page.evaluate(async (start) => {
+              const reports = [...(await window.__smashGuest.stats()).rtcStats];
+              const pair = reports.find(item => item.type === 'candidate-pair' && item.state === 'succeeded' && item.nominated);
+              const local = pair && reports.find(item => item.id === pair.localCandidateId);
+              const remote = pair && reports.find(item => item.id === pair.remoteCandidateId);
+              const inbound = reports.find(item => item.type === 'inbound-rtp' && item.kind === 'video');
+              const video = document.querySelector('#video');
+              const framesNow = inbound?.framesDecoded ?? video.getVideoPlaybackQuality?.().totalVideoFrames ?? video.webkitDecodedFrameCount ?? 0;
+              return {
+                connection: window.__smashGuest.state.connection,
+                decodedFrames: framesNow,
+                fps: inbound?.framesPerSecond ?? ((framesNow - start.frames) * 1000 / (performance.now() - start.at)),
+                rttMs: pair?.currentRoundTripTime == null ? null : pair.currentRoundTripTime * 1000,
+                candidatePairType: pair ? `${local?.candidateType ?? 'unknown'}-${remote?.candidateType ?? 'unknown'}` : null,
+                localCandidateType: local?.candidateType ?? null,
+                remoteCandidateType: remote?.candidateType ?? null,
+                virtualInputSentForMs: 5000,
+              };
+            }, before);
+            await fs.writeFile('external-guest-artifacts/getstats.json', JSON.stringify(result, null, 2));
+            if (result.connection !== 'Connected' || result.decodedFrames < 1 || result.rttMs == null || !result.candidatePairType) {
+              throw new Error(`Incomplete WebRTC proof: ${JSON.stringify(result)}`);
+            }
+            console.log(JSON.stringify(result));
+          } finally {
+            await browser.close();
+          }
+          NODE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: external-guest-proof
+          path: external-guest-artifacts/
+          if-no-files-found: warn
+          retention-days: 3
