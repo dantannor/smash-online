@@ -22,6 +22,7 @@ export class Sidecar {
     this.helper = null;
     this.fd = null;
     this.closed = false;
+    this.mute = Boolean(mute);
     this.p1Mode = p1 === "keyboard" ? "keyboard" : "pad-helper";
     this.p1Input = { buttons: 0, sx: 0, sy: 0 };
     if (this.p1Mode === "keyboard") {
@@ -31,7 +32,7 @@ export class Sidecar {
 
   writeSnapshot() {
     if (this.closed || this.fd === null) return;
-    const snapshot = encodeOSI1({ seq: this.seq++ >>> 0, mute: 0, ports: this.slots });
+    const snapshot = encodeOSI1({ seq: this.seq++ >>> 0, mute: this.mute ? 1 : 0, ports: this.slots });
     try {
       const written = fs.writeSync(this.fd, snapshot, 0, snapshot.length, 0);
       if (written !== snapshot.length) throw new Error(`short OSI1 write: ${written}/${snapshot.length} bytes`);
@@ -188,6 +189,7 @@ export function createSidecarServer(sidecar, { port = 8765, host = "127.0.0.1" }
       if (process.env.SMASH_DEBUG === "1") console.log(`[sidecar] type=${message.type} port=${Number.isInteger(message.port) ? message.port : "invalid"}`);
       if (message.type === "slot:connect") sidecar.connect(message.port, message.connectionId, client);
       else if (message.type === "slot:input") sidecar.input(message.port, message.connectionId, message.input, client);
+      else if (message.type === "mute" && typeof message.value === "boolean") { sidecar.mute = message.value; sidecar.writeSnapshot(); }
       else if (message.type === "slot:disconnect") sidecar.disconnect(message.port, message.connectionId, client);
       else sidecar.reject(client, "unknown_type", "unsupported message type");
     });
@@ -210,14 +212,15 @@ export function createSidecarServer(sidecar, { port = 8765, host = "127.0.0.1" }
 }
 
 function parseArgs(argv) {
-  const args = { file: null, port: 8765, p1: "keyboard" };
+  const args = { file: null, port: 8765, p1: "keyboard", mute: false };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--file") args.file = argv[++i];
     else if (argv[i] === "--port") args.port = Number(argv[++i]);
     else if (argv[i] === "--p1") args.p1 = argv[++i];
+    else if (argv[i] === "--mute") args.mute = true;
     else throw new Error(`unknown option: ${argv[i]}`);
   }
-  if (!args.file) throw new Error("usage: node sidecar/index.js --file <path> [--port 8765] [--p1 pad-helper:<cmd>]");
+  if (!args.file) throw new Error("usage: node sidecar/index.js --file <path> [--port 8765] [--p1 pad-helper:<cmd>] [--mute]");
   if (!Number.isInteger(args.port) || args.port < 1 || args.port > 65535) throw new Error("--port must be a valid TCP port");
   if (args.p1 !== "keyboard" && !args.p1.startsWith("pad-helper:")) throw new Error("--p1 must be keyboard or pad-helper:<cmd>");
   return args;
@@ -227,7 +230,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   try {
     const args = parseArgs(process.argv.slice(2));
     const p1 = args.p1.startsWith("pad-helper:") ? args.p1 : args.p1;
-    const sidecar = new Sidecar({ file: args.file, p1 }).start();
+    const sidecar = new Sidecar({ file: args.file, p1, mute: args.mute }).start();
     if (p1.startsWith("pad-helper:")) sidecar.startHelper(p1.slice("pad-helper:".length));
     const server = createSidecarServer(sidecar, { port: args.port });
     server.listen().then((address) => console.log(`sidecar listening on ws://${address.address}:${address.port}`)).catch((error) => { console.error(error); process.exitCode = 1; sidecar.close(); });
