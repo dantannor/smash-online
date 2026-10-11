@@ -129,6 +129,8 @@ async function handleSignal(message) {
   if (message.type === "slot:connected") {
     const port = Number(message.port);
     if (![2, 3, 4].includes(port) || !message.connectionId) return;
+    const existing = peers.get(port);
+    if (existing?.connectionId === message.connectionId && !["failed", "closed", "disconnected"].includes(existing.pc.connectionState)) return;
     closePeer(port, false);
     updateSlotStatus(port, "connecting");
     const peer = await createPeer(port, message.connectionId);
@@ -147,7 +149,13 @@ async function handleSignal(message) {
   } else if (message.type === "ice") {
     const peer = peers.get(Number(message.port));
     if (peer && message.candidate) await peer.pc.addIceCandidate(message.candidate).catch(() => {});
-  } else if (message.type === "error") status(message.message || message.code || "Signaling error", true);
+  } else if (message.type === "error") {
+    if (message.code === "ROOM_NOT_FOUND") {
+      sessionStorage.removeItem(STORAGE_KEY);
+      roomInfo = null;
+      status("Room expired. Reload this page to create a new room.", true);
+    } else status(message.message || message.code || "Signaling error", true);
+  }
 }
 
 async function createPeer(port, connectionId) {
