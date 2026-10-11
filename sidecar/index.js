@@ -11,7 +11,7 @@ const TIMEOUT_MS = 500;
 const neutral = () => ({ kind: KINDS.DISCONNECTED, enabled: 0, buttons: 0, sx: 0, sy: 0 });
 
 export class Sidecar {
-  constructor({ file, p1 = "keyboard", now = Date.now, onError = console.error }) {
+  constructor({ file, p1 = "keyboard", mute = false, now = Date.now, onError = console.error }) {
     if (!file) throw new TypeError("an OSI1 file path is required");
     this.file = path.resolve(file);
     this.now = now;
