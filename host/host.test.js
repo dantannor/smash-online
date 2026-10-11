@@ -213,3 +213,38 @@ test("host page plays P1 from the keyboard through the sidecar, with keep-alive"
     assert.deepEqual(await page.evaluate(() => { const { buttons, sx, sy } = window.__smashHostP1().last; return { buttons, sx, sy }; }), { buttons: 0, sx: 0, sy: 0 });
   } finally { await browser.close(); sidecar.close(); server.close(); }
 });
+
+test("host page in remote-signaling mode creates rooms and guest links on the signal origin", { timeout: 30_000 }, async () => {
+  const server = http.createServer(async (request, response) => {
+    const url = new URL(request.url, "http://localhost");
+    const files = { "/host": path.join(hostDir, "index.html"), "/host/host.js": path.join(hostDir, "host.js"), "/play/input-map.js": path.join(repoDir, "guest", "input-map.js"), "/shared/protocol.js": path.join(repoDir, "shared", "protocol.js") };
+    if (!files[url.pathname]) { response.writeHead(404).end(); return; }
+    response.writeHead(200, { "content-type": files[url.pathname].endsWith(".js") ? "text/javascript" : "text/html" });
+    response.end(await readFile(files[url.pathname]));
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await (await browser.newContext()).newPage();
+    const calls = [];
+    await page.route("https://signal.example.test/**", route => {
+      const url = new URL(route.request().url());
+      calls.push(url.pathname);
+      const json = body => route.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify(body) });
+      if (url.pathname === "/api/rooms") return json({ room: "r1", roomToken: "t1", slots: [2, 3, 4].map(port => ({ port, slotToken: `s${port}`, guestUrl: `https://signal.example.test/play?room=r1&slot=s${port}` })) });
+      if (url.pathname === "/api/ice") return json({ iceServers: [] });
+      return route.abort();
+    });
+    await page.routeWebSocket(/^wss:\/\/signal\.example\.test\/ws/, ws => { calls.push("/ws"); ws.close(); });
+    await page.goto(`http://127.0.0.1:${server.address().port}/host?source=canvas&signal=https%3A%2F%2Fsignal.example.test`);
+    await page.locator("#start").click();
+    await page.getByRole("heading", { name: "P2" }).waitFor();
+    assert.match(await page.locator('input[aria-label="P3 guest link"]').inputValue(), /^https:\/\/signal\.example\.test\/play\?room=r1&slot=s3$/);
+    assert.ok(calls.includes("/api/rooms"));
+    // A reload keeps using the same signal origin even without the query parameter.
+    await page.goto(`http://127.0.0.1:${server.address().port}/host?source=canvas`);
+    await page.getByRole("heading", { name: "P2" }).waitFor();
+    assert.match(await page.locator('input[aria-label="P2 guest link"]').inputValue(), /signal\.example\.test/);
+    assert.ok(calls.includes("/ws"), "signaling websocket targets the signal origin");
+  } finally { await browser.close(); server.close(); }
+});

@@ -135,3 +135,13 @@ test("tells a replaced guest socket why it was closed", async (t) => {
   assert.equal((await message).code, "SLOT_REPLACED");
   await closeSocket(second);
 });
+
+test("SMASH_SIGNAL_ORIGIN makes /host open in remote-signaling mode", async (t) => {
+  const ctx = await setup(); t.after(ctx.close);
+  process.env.SMASH_SIGNAL_ORIGIN = "https://signal.example.test";
+  t.after(() => { delete process.env.SMASH_SIGNAL_ORIGIN; });
+  const redirect = await fetch(`${ctx.origin}/host`, { redirect: "manual" });
+  assert.equal(redirect.status, 302);
+  assert.equal(redirect.headers.get("location"), "/host?signal=https%3A%2F%2Fsignal.example.test");
+  assert.equal((await fetch(`${ctx.origin}/host?signal=https%3A%2F%2Fsignal.example.test`)).status, 200);
+});
