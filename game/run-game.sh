@@ -16,6 +16,15 @@ export OPENSMASH_LAUNCHER_INPUT="$INPUT_FILE"
 export SSB64_BOOT_SLOTS=hhhh
 export SSB64_BOOT_BATTLE=-1,-1,4,0,-1,-1
 export SSB64_START_SCENE=16
+# Custom fighters (scripts/stage-roster.sh). SMASH_ROSTER=vanilla (or no staged roster) keeps the 12 originals only.
+ROSTER_DIR="${SMASH_ROSTER_DIR:-$BUILD_ROOT/roster}"
+if [[ "${SMASH_ROSTER:-custom}" != vanilla && -f "$ROSTER_DIR/roster.txt" ]]; then
+  # roster.txt paths are relative to the game's working directory
+  ln -sfn "$ROSTER_DIR/characters" "$GAME_DIR/characters"
+  export SSB64_ROSTER_FILE="$ROSTER_DIR/roster.txt" SSB64_ROSTER_PAGE=1
+elif [[ "${SMASH_ROSTER:-custom}" != vanilla ]]; then
+  echo "No staged roster at $ROSTER_DIR (run scripts/stage-roster.sh); starting vanilla." >&2
+fi
 node "$ROOT/game/configure-window.mjs" "$GAME_DIR/BattleShip.cfg.json"
 mkdir -p "$BUILD_ROOT/bin"
 if [[ ! -x "$BUILD_ROOT/bin/sck-capture" || "$ROOT/game/capture/sck-capture.swift" -nt "$BUILD_ROOT/bin/sck-capture" ]]; then
