@@ -2,7 +2,16 @@
 
 Local Smash 64 streaming/input prototype with a native game, OSI1 sidecar, signaling server, host, guest, and browser harness. DW3 and DW4 pass. DW4 verified a VS match, live guest video, and P2 input from a guest page. The ScreenCaptureKit helper now builds from `game/run-game.sh`. See [Phase 2 status](docs/evidence/phase2-status.json) and the [DW4 report](docs/evidence/dw4-report.json).
 
-## Local setup
+## Quickstart
+
+```sh
+./scripts/start.sh            # game -> sidecar (muted) -> local server -> host Chrome, via the Cloudflare Worker
+./scripts/stop.sh             # stops exactly what start.sh started
+```
+
+`start.sh` checks the game binary, free ports (8765, 8787) and the Worker's `/healthz`, runs everything detached (it survives closing the terminal), and records pids and logs under `~/.smash-online/run/<timestamp>/` (`current` points at the active run). Running it again while a session is up just reprints the links. Then click **Start capture** in the host Chrome window (keep it in the foreground) and share the P2-P4 links shown on the host page; you play P1 from the host page. Options: `--no-browser` (print the host URL, open it yourself), `--local` (no Worker; local signaling, use `./server/tunnel.sh` for remote guests). Env overrides: `SMASH_ONLINE_BINARY`, `SMASH_SIGNAL_ORIGIN`, `SMASH_INPUT_FILE`, `SMASH_CHROME`, `SMASH_GAME_CMD` (replace the game, for tests). `stop.sh` sends SIGTERM to each process group, force-kills after 5 seconds, and `--purge` also deletes the logs. `scripts/stop-live.sh` remains for the older hand-started `/tmp/smash-live` session.
+
+## Local setup (manual steps)
 
 1. Build the native game with the absolute local ROM path: `ROM_PATH='/Users/danieltannor/Downloads/Super Smash Bros. (USA).z64' ./game/build.sh`. The ROM and generated assets stay outside this repo.
 2. Start `./game/run-game.sh`. It opens BattleShip windowed at VS character select and builds `sck-capture` when needed.
