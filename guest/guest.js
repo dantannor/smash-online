@@ -17,6 +17,8 @@ let lastInput = { buttons: 0, sx: 0, sy: 0 };
 let lastEncoded = '';
 let statsTimer;
 let stopping = false;
+let iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
+const relayOnly = params.get('relay') === '1';
 let disconnectTimer;
 
 function setState(value, error = null) {
@@ -86,6 +88,10 @@ async function connect() {
   if (!room || !slotToken) { setState('Invalid link', 'missing room or slot'); hint.textContent = 'This link is missing its room or slot token.'; return; }
   setState('Joining');
   try {
+    try {
+      const ice = await (await fetch('/api/ice', { cache: 'no-store' })).json();
+      if (Array.isArray(ice.iceServers) && ice.iceServers.length) iceServers = ice.iceServers;
+    } catch { /* default STUN stays */ }
     const response = await fetch(`/api/rooms/${encodeURIComponent(room)}/join`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ slotToken }),
     });
@@ -131,7 +137,7 @@ async function handleSignal(raw, ownGeneration) {
 }
 const pendingIce = [];
 function createPeer(ownGeneration) {
-  peer = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+  peer = new RTCPeerConnection({ iceServers, iceTransportPolicy: relayOnly ? 'relay' : 'all' });
   peer.onicecandidate = ({ candidate }) => {
     if (candidate && ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'ice', candidate }));
   };
