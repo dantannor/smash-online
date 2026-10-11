@@ -208,7 +208,8 @@ export function createSidecarServer(sidecar, { port = 8765, host = "127.0.0.1" }
   return { httpServer, wss, listen: () => new Promise((resolve, reject) => {
     httpServer.once("error", reject);
     httpServer.listen(port, host, () => { httpServer.removeListener("error", reject); resolve(httpServer.address()); });
-  }), close: () => new Promise((resolve) => { wss.close(() => httpServer.close(() => resolve())); }) };
+  }), terminate: () => { for (const ws of wss.clients) ws.terminate(); },
+  close: () => new Promise((resolve) => { wss.close(() => httpServer.close(() => resolve())); }) };
 }
 
 function parseArgs(argv) {
@@ -234,8 +235,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     if (p1.startsWith("pad-helper:")) sidecar.startHelper(p1.slice("pad-helper:".length));
     const server = createSidecarServer(sidecar, { port: args.port });
     server.listen().then((address) => console.log(`sidecar listening on ws://${address.address}:${address.port}`)).catch((error) => { console.error(error); process.exitCode = 1; sidecar.close(); });
-    const shutdown = () => { server.close().finally(() => { sidecar.close(); }); };
-    process.once("SIGINT", shutdown);
-    process.once("SIGTERM", shutdown);
+    // wss.close() waits on open clients, so a connected host page blocked exit: drop them, flush neutral, exit.
+    let stopping = false;
+    const shutdown = () => {
+      if (stopping) process.exit(1);
+      stopping = true;
+      try { server.terminate(); } catch (error) { console.error(error); }
+      try { sidecar.close(); } catch (error) { console.error(error); }
+      process.exit(0);
+    };
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }
