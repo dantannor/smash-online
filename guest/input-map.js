@@ -26,7 +26,7 @@ export function mapGamepad(gamepad) {
   set(cy < -0.35, BUTTONS.C_UP); set(cy > 0.35, BUTTONS.C_DOWN);
   set(cx < -0.35, BUTTONS.C_LEFT); set(cx > 0.35, BUTTONS.C_RIGHT);
   result.sx = axisValue(axes[0]);
-  result.sy = axisValue(axes[1]);
+  result.sy = -axisValue(axes[1]) || 0; // Gamepad Y is down-positive; the game's stick Y is up-positive.
   return result;
 }
 
@@ -36,8 +36,8 @@ export function mapKeyboard(keys) {
   const set = (key, mask) => { if (has(key)) result.buttons |= mask; };
   if (has('ArrowLeft') || has('a') || has('A')) result.sx = -80;
   if (has('ArrowRight') || has('d') || has('D')) result.sx = 80;
-  if (has('ArrowUp') || has('w') || has('W')) result.sy = -80;
-  if (has('ArrowDown') || has('s') || has('S')) result.sy = 80;
+  if (has('ArrowUp') || has('w') || has('W')) result.sy = 80;
+  if (has('ArrowDown') || has('s') || has('S')) result.sy = -80;
   set('j', BUTTONS.A); set('J', BUTTONS.A);
   set('k', BUTTONS.B); set('K', BUTTONS.B);
   set('l', BUTTONS.Z); set('L', BUTTONS.Z);
