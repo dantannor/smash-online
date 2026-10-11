@@ -1,3 +1,4 @@
+import { mapGamepad, mapKeyboard } from "/play/input-map.js";
 import { clampInputMessage, validateInputMessage } from "../shared/protocol.js";
 
 const STORAGE_KEY = "smash-host-room";
@@ -260,7 +261,7 @@ function connectSidecar() {
       if (peer.channel?.readyState === "open") sidecar.send(JSON.stringify({ type: "slot:connect", port, connectionId: peer.connectionId }));
     }
   });
-  sidecar.addEventListener("close", () => { sidecarRetry = setTimeout(connectSidecar, 1000); });
+  sidecar.addEventListener("close", () => { p1Connected = false; sidecarRetry = setTimeout(connectSidecar, 1000); });
   sidecar.addEventListener("error", () => { try { sidecar.close(); } catch { /* noop */ } });
 }
 
@@ -425,22 +426,37 @@ sourceSelect.addEventListener("change", () => {
   history.replaceState(null, "", url);
 });
 
+const p1Keys = new Set();
+let p1Connected = false;
+let lastP1Sent = 0;
+const p1Toggle = document.querySelector("#p1-toggle");
+const typing = target => ["INPUT", "SELECT", "TEXTAREA"].includes(target?.tagName);
+window.addEventListener("keydown", event => { if (!typing(event.target) && !event.metaKey && !event.ctrlKey) { p1Keys.add(event.key); if (p1Toggle.checked && event.key.startsWith("Arrow")) event.preventDefault(); } });
+window.addEventListener("keyup", event => p1Keys.delete(event.key));
+window.addEventListener("blur", () => p1Keys.clear());
+
 function pollGamepad() {
-  if (!document.querySelector("#p1-toggle").checked) { lastGamepadState = null; return; }
+  if (!p1Toggle.checked) { lastGamepadState = null; return; }
   const pad = [...(navigator.getGamepads?.() || [])].find(Boolean);
-  if (!pad) return;
-  if (!lastGamepadState) sendSidecar({ type: "slot:connect", port: 1, connectionId: "host-p1" });
-  const buttons = pad.buttons.reduce((mask, button, index) => button.pressed ? mask | (index < 16 ? 1 << (15 - index) : 0) : mask, 0);
-  const input = { seq: (hostConnectionSequence++ >>> 0), t: performance.now(), buttons, sx: Math.round((pad.axes[0] || 0) * 80), sy: Math.round((pad.axes[1] || 0) * 80) };
-  if (JSON.stringify(input) !== JSON.stringify(lastGamepadState)) {
-    sendSidecar({ type: "slot:input", port: 1, connectionId: "host-p1", input });
-    lastGamepadState = input;
-  }
+  const keys = mapKeyboard(p1Keys);
+  const padInput = pad ? mapGamepad(pad) : { buttons: 0, sx: 0, sy: 0 };
+  if (!p1Connected && sidecar?.readyState === WebSocket.OPEN) { sendSidecar({ type: "slot:connect", port: 1, connectionId: "host-p1" }); p1Connected = true; lastGamepadState = null; }
+  if (!p1Connected) return;
+  const merged = { buttons: padInput.buttons | keys.buttons, sx: padInput.sx || keys.sx, sy: padInput.sy || keys.sy };
+  const now = performance.now();
+  const changed = !lastGamepadState || merged.buttons !== lastGamepadState.buttons || merged.sx !== lastGamepadState.sx || merged.sy !== lastGamepadState.sy;
+  // The sidecar neutralizes a kind-3 port after 500 ms of silence, so held input needs a keep-alive.
+  if (!changed && now - lastP1Sent < 100) return;
+  const input = clampInputMessage({ seq: (hostConnectionSequence++ >>> 0), t: now, ...merged });
+  sendSidecar({ type: "slot:input", port: 1, connectionId: "host-p1", input });
+  lastGamepadState = input;
+  lastP1Sent = now;
 }
 
-document.querySelector("#p1-toggle").addEventListener("change", event => {
-  if (!event.target.checked && lastGamepadState) {
+p1Toggle.addEventListener("change", event => {
+  if (!event.target.checked && p1Connected) {
     sendSidecar({ type: "slot:disconnect", port: 1, connectionId: "host-p1" });
+    p1Connected = false;
     lastGamepadState = null;
   }
 });
@@ -461,6 +477,7 @@ try {
   if (saved?.room && saved?.roomToken && Array.isArray(saved.slots)) reattachRoom(saved);
 } catch { sessionStorage.removeItem(STORAGE_KEY); }
 
+window.__smashHostP1 = () => ({ connected: p1Connected, enabled: p1Toggle.checked, last: lastGamepadState });
 window.__smashHostStats = () => ({
   room: roomInfo?.room || null,
   signalingState: signaling?.readyState ?? null,

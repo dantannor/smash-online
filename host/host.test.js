@@ -30,6 +30,7 @@ test("host room links, canvas capture recovery, and guest input forwarding", { t
       let file;
       if (["/host", "/host/", "/host/index.html"].includes(url.pathname)) file = path.join(hostDir, "index.html");
       else if (url.pathname === "/host/host.js") file = path.join(hostDir, "host.js");
+      else if (url.pathname === "/play/input-map.js") file = path.join(repoDir, "guest", "input-map.js");
       else if (url.pathname === "/shared/protocol.js") file = path.join(repoDir, "shared", "protocol.js");
       if (file) {
         try { response.writeHead(200, { "content-type": file.endsWith(".js") ? "text/javascript" : "text/html" }); response.end(await readFile(file)); }
@@ -168,4 +169,35 @@ test("host room links, canvas capture recovery, and guest input forwarding", { t
     await new Promise(resolve => sidecarServer?.close(() => resolve()) ?? resolve());
     await new Promise(resolve => roomServer?.close(() => resolve()) ?? resolve());
   }
+});
+
+test("host page plays P1 from the keyboard through the sidecar, with keep-alive", { timeout: 30_000 }, async () => {
+  const messages = [];
+  const sidecar = new WebSocketServer({ port: 0 });
+  sidecar.on("connection", ws => { ws.send(JSON.stringify({ type: "ready" })); ws.on("message", raw => messages.push(JSON.parse(raw.toString()))); });
+  const server = http.createServer(async (request, response) => {
+    const url = new URL(request.url, "http://localhost");
+    const files = { "/host": path.join(hostDir, "index.html"), "/host/host.js": path.join(hostDir, "host.js"), "/play/input-map.js": path.join(repoDir, "guest", "input-map.js"), "/shared/protocol.js": path.join(repoDir, "shared", "protocol.js") };
+    if (!files[url.pathname]) { response.writeHead(404).end(); return; }
+    response.writeHead(200, { "content-type": files[url.pathname].endsWith(".js") ? "text/javascript" : "text/html" });
+    response.end(await readFile(files[url.pathname]));
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const context = await browser.newContext();
+    await context.addInitScript(port => { window.__SMASH_E2E_SIDECAR_URL__ = `ws://127.0.0.1:${port}`; }, sidecar.address().port);
+    const page = await context.newPage();
+    await page.goto(`http://127.0.0.1:${server.address().port}/host?source=canvas`);
+    assert.equal(await page.locator("#p1-toggle").isChecked(), true, "P1 is on by default");
+    await page.waitForFunction(() => window.__smashHostP1().connected);
+    await page.keyboard.down("d"); await page.keyboard.down("j");
+    await page.waitForTimeout(700);
+    const held = messages.filter(m => m.type === "slot:input" && m.port === 1 && m.input.sx === 80 && m.input.buttons === 32768);
+    assert.ok(held.length >= 4, `held input is re-sent as keep-alive (${held.length})`);
+    assert.ok(messages.some(m => m.type === "slot:connect" && m.port === 1));
+    await page.keyboard.up("d"); await page.keyboard.up("j");
+    await page.waitForTimeout(300);
+    assert.deepEqual(await page.evaluate(() => { const { buttons, sx, sy } = window.__smashHostP1().last; return { buttons, sx, sy }; }), { buttons: 0, sx: 0, sy: 0 });
+  } finally { await browser.close(); sidecar.close(); server.close(); }
 });
