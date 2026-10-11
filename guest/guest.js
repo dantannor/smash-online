@@ -17,6 +17,7 @@ let lastInput = { buttons: 0, sx: 0, sy: 0 };
 let lastEncoded = '';
 let statsTimer;
 let stopping = false;
+let disconnectTimer;
 
 function setState(value, error = null) {
   state.connection = value;
@@ -65,6 +66,13 @@ function closeConnection() {
   if (ws) { ws.onclose = ws.onerror = ws.onmessage = null; try { ws.close(); } catch {} }
   ws = null;
 }
+function stopForReplacement() {
+  stopping = true;
+  clearTimeout(reconnectTimer); clearTimeout(disconnectTimer);
+  closeConnection();
+  setState('Replaced', 'This link is open in another tab');
+  hint.hidden = false; hint.textContent = 'This link is open in another tab. Close the other tab, then reload this one.';
+}
 function scheduleReconnect(reason) {
   if (stopping || reconnectTimer) return;
   setState('Reconnecting', reason || null);
@@ -95,7 +103,7 @@ async function connect() {
     ws.onopen = () => { if (ownGeneration === generation) setState('Signaling connected'); };
     ws.onmessage = (event) => { if (ownGeneration === generation) void handleSignal(event.data, ownGeneration); };
     ws.onerror = () => { if (ownGeneration === generation) scheduleReconnect('signaling error'); };
-    ws.onclose = () => { if (ownGeneration === generation) scheduleReconnect('signaling closed'); };
+    ws.onclose = (event) => { if (ownGeneration !== generation) return; if (event.code === 4001) stopForReplacement(); else scheduleReconnect('signaling closed'); };
   } catch (error) {
     if (ownGeneration === generation) scheduleReconnect(error?.message || 'join failed');
   }
@@ -103,6 +111,7 @@ async function connect() {
 async function handleSignal(raw, ownGeneration) {
   let message;
   try { message = JSON.parse(raw); } catch { return; }
+  if (message.type === 'error' && message.code === 'SLOT_REPLACED') { stopForReplacement(); return; }
   if (message.type === 'error') { scheduleReconnect(message.message || message.code || 'signaling rejected'); return; }
   if (message.type === 'ice' && message.candidate) {
     try {
@@ -142,7 +151,10 @@ function createPeer(ownGeneration) {
   };
   peer.onconnectionstatechange = () => {
     if (ownGeneration !== generation) return;
-    if (['failed', 'disconnected', 'closed'].includes(peer?.connectionState)) scheduleReconnect(`peer ${peer.connectionState}`);
+    clearTimeout(disconnectTimer);
+    // 'disconnected' is usually transient ICE churn; only tear down if it persists.
+    if (peer?.connectionState === 'disconnected') disconnectTimer = setTimeout(() => { if (ownGeneration === generation && peer?.connectionState === 'disconnected') scheduleReconnect('peer disconnected'); }, 8000);
+    else if (['failed', 'closed'].includes(peer?.connectionState)) scheduleReconnect(`peer ${peer.connectionState}`);
     else if (peer?.connectionState === 'connected' && !dataChannel) setState('Peer connected');
   };
   statsTimer = setInterval(() => void readStats(), 1000);

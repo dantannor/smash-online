@@ -124,3 +124,14 @@ test("serves static pages safely and blocks ROMs and traversal", async (t) => {
   assert.equal((await fetch(`${ctx.origin}/shared/%2e%2e%2fPROTOCOL.md`)).status, 403);
   for (const file of ["game.n64", "game.z64", "game.v64", "game.o2r", "game.otr"]) assert.equal((await fetch(`${ctx.origin}/shared/${file}`)).status, 403);
 });
+
+test("tells a replaced guest socket why it was closed", async (t) => {
+  const ctx = await setup(); t.after(ctx.close);
+  const room = await createRoom(ctx.origin);
+  const query = { room: room.room, role: "guest", port: 2, token: room.slots[0].slotToken };
+  const first = await opened(connect(ctx.origin, query));
+  const message = nextMessage(first);
+  const second = await opened(connect(ctx.origin, query));
+  assert.equal((await message).code, "SLOT_REPLACED");
+  await closeSocket(second);
+});
