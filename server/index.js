@@ -85,7 +85,7 @@ export function createApplication({ now = Date.now } = {}) {
       for (const [slotPort, slot] of Object.entries(room.slots)) if (slot.socket?.readyState === WebSocket.OPEN) send(ws, { type: "slot:connected", port: Number(slotPort), connectionId: slot.connectionId });
     } else {
       const slot = room.slots[port];
-      if (slot.socket?.readyState === WebSocket.OPEN) slot.socket.close(4001, "slot replaced");
+      if (slot.socket?.readyState === WebSocket.OPEN) { sendError(slot.socket, "SLOT_REPLACED", "This link was opened in another tab"); slot.socket.close(4001, "slot replaced"); }
       connectionId = randomBytes(12).toString("base64url"); slot.socket = ws; slot.connectionId = connectionId;
       ws.smashMeta.connectionId = connectionId;
       if (room.host?.readyState === WebSocket.OPEN) send(room.host, { type: "slot:connected", port, connectionId });
