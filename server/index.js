@@ -30,6 +30,11 @@ export function createApplication({ now = Date.now } = {}) {
     const url = new URL(req.url, "http://localhost");
     if (req.method === "GET" && url.pathname === "/healthz") return json(res, 200, { status: "ok" });
     if (req.method === "GET" && url.pathname === "/api/ice") return json(res, 200, { iceServers: STUN.map((urls) => ({ urls })) });
+    if (req.method === "GET" && url.pathname === "/host" && process.env.SMASH_SIGNAL_ORIGIN && !url.searchParams.has("signal")) {
+      url.searchParams.set("signal", process.env.SMASH_SIGNAL_ORIGIN);
+      res.writeHead(302, { location: `/host?${url.searchParams}` });
+      return res.end();
+    }
     if (req.method === "POST" && url.pathname === "/api/rooms") {
       sweep();
       const id = randomBytes(12).toString("base64url");

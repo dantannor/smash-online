@@ -2,6 +2,13 @@ import { mapGamepad, mapKeyboard } from "/play/input-map.js";
 import { clampInputMessage, validateInputMessage } from "../shared/protocol.js";
 
 const STORAGE_KEY = "smash-host-room";
+// Optional remote signaling origin (the Cloudflare Worker). The host page itself stays local so it can reach the sidecar.
+const signalOrigin = (() => {
+  const valid = value => { try { const url = new URL(value); return /^https?:$/.test(url.protocol) ? url.origin : ""; } catch { return ""; } };
+  const param = new URLSearchParams(location.search).get("signal");
+  if (param !== null) return valid(param);
+  try { return valid(JSON.parse(sessionStorage.getItem(STORAGE_KEY) || "null")?.signal || ""); } catch { return ""; }
+})();
 const FALLBACK_ICE = [{ urls: "stun:stun.l.google.com:19302" }];
 const statusEl = document.querySelector("#status");
 const linksEl = document.querySelector("#guest-links");
@@ -79,7 +86,7 @@ function ensureStatsCard(port) {
 }
 
 async function api(path, options = {}) {
-  const response = await fetch(path, { cache: "no-store", ...options, headers: options.body ? { "Content-Type": "application/json", ...options.headers } : options.headers });
+  const response = await fetch(signalOrigin + path, { cache: "no-store", ...options, headers: options.body ? { "Content-Type": "application/json", ...options.headers } : options.headers });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.message || body.error || `Request failed (${response.status})`);
   return body;
@@ -94,8 +101,8 @@ async function fetchIceServers() {
 }
 
 function signalingUrl(room) {
-  const url = new URL("/ws", location.href);
-  url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
+  const url = new URL("/ws", signalOrigin || location.href);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   url.searchParams.set("room", room.room);
   url.searchParams.set("role", "host");
   url.searchParams.set("token", room.roomToken);
@@ -385,7 +392,7 @@ function stopCapture() {
 async function createRoom() {
   startButton.disabled = true;
   try {
-    roomInfo = await api("/api/rooms", { method: "POST", body: "{}" });
+    roomInfo = { ...(await api("/api/rooms", { method: "POST", body: "{}" })), signal: signalOrigin };
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(roomInfo));
     renderLinks(roomInfo.slots);
     connectSidecar();

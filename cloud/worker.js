@@ -25,9 +25,29 @@ async function iceServers(env) {
   } catch { return STUN; }
 }
 
+// The host page is served from the local machine (so it can reach the sidecar) and calls this API cross-origin.
+const LOCAL_ORIGIN = /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/;
+function withCors(request, response) {
+  const origin = request.headers.get("origin");
+  if (!origin || !LOCAL_ORIGIN.test(origin)) return response;
+  const headers = new Headers(response.headers);
+  headers.set("access-control-allow-origin", origin);
+  headers.set("vary", "origin");
+  return new Response(response.body, { status: response.status, headers });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname.startsWith("/api/")) {
+      if (request.method === "OPTIONS") return withCors(request, new Response(null, { status: 204, headers: { "access-control-allow-methods": "GET, POST, OPTIONS", "access-control-allow-headers": "content-type", "access-control-max-age": "600" } }));
+      return withCors(request, await route(request, env, url));
+    }
+    return route(request, env, url);
+  }
+};
+
+async function route(request, env, url) {
     if (request.method === "GET" && url.pathname === "/healthz") return json(200, { status: "ok" });
     if (request.method === "GET" && url.pathname === "/api/ice") return json(200, { iceServers: await iceServers(env) });
     if (request.method === "POST" && url.pathname === "/api/rooms") {
@@ -55,5 +75,4 @@ export default {
     }
     if (ROM_EXT.test(url.pathname)) return json(403, { error: { code: "ROM_FORBIDDEN", message: "ROM files are not served" } });
     return env.ASSETS.fetch(request);
-  },
-};
+  }

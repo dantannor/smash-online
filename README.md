@@ -30,5 +30,5 @@ The macOS BattleShip window capture produced a video track and no audio track. G
 - Deploy (free plan, uses the existing `wrangler login`): `npm run cloud:deploy`. Worker name `smash-online`, served at its `workers.dev` URL.
 - `/api/ice` always returns `stun:stun.cloudflare.com:3478`. If the Worker secrets `TURN_KEY_ID` and `TURN_KEY_API_TOKEN` exist it also returns short-lived Cloudflare Realtime TURN credentials (including `turns:` on 443). Create a TURN key in the dashboard (Realtime, TURN), then from the repo root: `npx wrangler secret put TURN_KEY_ID --config cloud/wrangler.toml` and the same for `TURN_KEY_API_TOKEN`.
 - Guest pages accept `?relay=1` to force relay-only ICE for testing.
-- The host page still talks to the local sidecar at `ws://127.0.0.1:8765`.
+- The host page stays on the local server (so it can reach the sidecar at `ws://127.0.0.1:8765` without browser local-network prompts) and uses the Worker for rooms and signaling: open `http://127.0.0.1:8787/host?signal=https://<worker>.workers.dev`, or start the local server with `SMASH_SIGNAL_ORIGIN=https://<worker>.workers.dev` and `/host` redirects there. Guest links point at the Worker's `/play`. The Worker allows CORS from `http://127.0.0.1` / `http://localhost` only.
 - Tests: `node --test cloud/worker.test.js` (starts `wrangler dev --local`).

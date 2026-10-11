@@ -65,6 +65,16 @@ test("rooms, join by slot token, relay, replay and replacement", async () => {
   host.close();
 });
 
+test("API is callable cross-origin from the local host page only", async () => {
+  const allowed = await fetch(`${origin}/api/ice`, { headers: { origin: "http://127.0.0.1:8787" } });
+  assert.equal(allowed.headers.get("access-control-allow-origin"), "http://127.0.0.1:8787");
+  const denied = await fetch(`${origin}/api/ice`, { headers: { origin: "https://evil.example" } });
+  assert.equal(denied.headers.get("access-control-allow-origin"), null);
+  const preflight = await fetch(`${origin}/api/rooms`, { method: "OPTIONS", headers: { origin: "http://localhost:8787", "access-control-request-method": "POST" } });
+  assert.equal(preflight.status, 204);
+  assert.equal(preflight.headers.get("access-control-allow-origin"), "http://localhost:8787");
+});
+
 test("bad credentials and unknown rooms are rejected with a code", async () => {
   const room = await createRoom();
   assert.equal((await nextMessage(connect({ room: "missing", role: "host", token: "x" }))).code, "ROOM_NOT_FOUND");
