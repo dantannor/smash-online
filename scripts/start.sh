@@ -14,6 +14,7 @@ INPUT_FILE="${SMASH_INPUT_FILE:-${OPENSMASH_LAUNCHER_INPUT:-/tmp/smash-online-in
 BINARY="${SMASH_ONLINE_BINARY:-$HOME/Projects/smash-online-build/src/BattleShip/build-us/BattleShip}"
 CHROME="${SMASH_CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
 CAPTURE_SOURCE="${SMASH_CAPTURE_SOURCE:-BattleShip (Metal)}"
+CHROME_DEBUG_PORT="${SMASH_CHROME_DEBUG_PORT:-}" # optional: expose CDP on 127.0.0.1 so tests can click Start capture
 SETTLE="${SMASH_GAME_SETTLE:-2}"
 GAME_TIMEOUT="${SMASH_GAME_TIMEOUT:-90}"
 MODE=worker BROWSER=1
@@ -150,7 +151,9 @@ wait_for "local server" 15 curl -fsS -m 2 "http://127.0.0.1:$SERVER_PORT/healthz
 
 if ((BROWSER)); then
   echo "Opening host Chrome..."
-  launch chrome "$CHROME" "--user-data-dir=$RUN_DIR/chrome-profile" --no-first-run --no-default-browser-check \
+  chrome_extra=()
+  [[ -n "$CHROME_DEBUG_PORT" ]] && chrome_extra=("--remote-debugging-port=$CHROME_DEBUG_PORT" --remote-debugging-address=127.0.0.1)
+  launch chrome "$CHROME" "--user-data-dir=$RUN_DIR/chrome-profile" ${chrome_extra[@]+"${chrome_extra[@]}"} --no-first-run --no-default-browser-check \
     "--auto-select-desktop-capture-source=$CAPTURE_SOURCE" "$(cat "$RUN_DIR/host-url")"
   osascript -e 'tell application "Google Chrome" to activate' >/dev/null 2>&1 || true
 fi
