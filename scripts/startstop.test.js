@@ -125,4 +125,23 @@ test("start.sh and stop.sh manage an isolated stack", async (t) => {
     const left = spawnSync("pgrep", ["-f", "sleep 4712"], { encoding: "utf8" }).stdout.trim();
     assert.equal(left, "", "fake game from the failed start is gone");
   });
+
+  await t.test("watchdog restarts a crashed game and the sidecar when the OSI1 inode changes", async () => {
+    const marker = join(dir, "crashed-once");
+    const wd = { ...env, SMASH_GAME_CMD: `if [ -e '${marker}' ]; then rm -f "$OPENSMASH_LAUNCHER_INPUT"; head -c 80 /dev/zero > "$OPENSMASH_LAUNCHER_INPUT"; exec sleep 4713; else touch '${marker}'; head -c 80 /dev/zero > "$OPENSMASH_LAUNCHER_INPUT"; sleep 2; exit 3; fi` };
+    rmSync(input, { force: true });
+    const r = sh(start, wd, "--local");
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    const first = readPids(base);
+    const log = join(base, "current/restarts.log");
+    const end = Date.now() + 25000;
+    while (Date.now() < end && !(existsSync(log) && /sidecar restarted/.test(readFileSync(log, "utf8")))) await new Promise((ok) => setTimeout(ok, 300));
+    const text = readFileSync(log, "utf8");
+    assert.match(text, /game exited \(code 3\)/);
+    assert.match(text, /sidecar restarted/);
+    const second = readPids(base);
+    assert.notEqual(second.sidecar, first.sidecar);
+    assert.ok(alive(second.sidecar) && alive(first.game));
+    assert.equal(sh(stop, env).status, 0);
+  });
 });
