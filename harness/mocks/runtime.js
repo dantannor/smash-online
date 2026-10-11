@@ -149,7 +149,9 @@ export async function startMockRuntime() {
   state.connect = (port, id) => { state.connected.set(port, id); state.ports[PORTS[`P${port}`]] = { ...neutral(), kind: KINDS.FILE_DRIVEN_PAD, enabled: 1 }; lastSequences.delete(port); };
   const freshness = setInterval(() => {
     for (const [port, connectionId] of state.connected) {
-      if (Date.now() - (lastInputAt.get(port) ?? Date.now()) > 500) state.disconnect(port, connectionId);
+      // A slot that has not delivered its first input yet is still waiting on WebRTC setup, which is not bounded by the 500ms input freshness window.
+      const limit = lastSequences.has(port) ? 500 : 15_000;
+      if (Date.now() - (lastInputAt.get(port) ?? Date.now()) > limit) state.disconnect(port, connectionId);
       else state.seq = (state.seq + 1) >>> 0;
     }
   }, 75);
