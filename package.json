@@ -8,10 +8,13 @@
   },
   "scripts": {
     "start": "node server/index.js",
-    "test": "node --test --test-timeout=30000 $(find . -type f -name '*.test.js' -not -path './node_modules/*' -print)"
+    "test": "node --test --test-timeout=30000 $(find . -type f -name '*.test.js' -not -path './node_modules/*' -print)",
+    "cloud:build": "node cloud/build-assets.mjs",
+    "cloud:deploy": "node cloud/build-assets.mjs && wrangler deploy --config cloud/wrangler.toml"
   },
   "devDependencies": {
     "playwright": "1.64.0",
+    "wrangler": "^4.149.0",
     "ws": "8.22.0"
   }
 }

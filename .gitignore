@@ -11,3 +11,5 @@ test-results/
 screenshots-tmp/
 harness/reports/e2e-*.json
 !harness/reports/e2e-sample.json
+cloud/public/
+cloud/.wrangler/
