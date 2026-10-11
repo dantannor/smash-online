@@ -151,16 +151,16 @@ async function handleSignal(message) {
 }
 
 async function createPeer(port, connectionId) {
-  if (!stream) throw new Error("Start capture before connecting guests.");
   const pc = new RTCPeerConnection({ iceServers: await fetchIceServers() });
-  const peer = { pc, connectionId, channel: null, statsTimer: null, offerAt: 0, lastBytes: 0, lastStatsAt: 0 };
-  for (const track of stream.getTracks()) pc.addTrack(track, stream);
+  const videoTrack = stream?.getVideoTracks()[0] || null;
+  const videoTransceiver = pc.addTransceiver(videoTrack || "video", { direction: "sendonly" });
+  const peer = { pc, connectionId, channel: null, statsTimer: null, offerAt: 0, lastBytes: 0, lastStatsAt: 0, videoSender: videoTransceiver.sender };
+  for (const track of stream?.getAudioTracks() || []) pc.addTrack(track, stream);
   const videoCodec = RTCRtpSender.getCapabilities?.("video")?.codecs?.filter(codec => /H264/i.test(codec.mimeType)) || [];
   if (videoCodec.length && typeof RTCRtpTransceiver !== "undefined" && RTCRtpTransceiver.prototype.setCodecPreferences) {
-    const transceiver = pc.getTransceivers().find(item => item.sender.track?.kind === "video");
-    transceiver?.setCodecPreferences([...videoCodec, ...RTCRtpSender.getCapabilities("video").codecs.filter(codec => !/H264/i.test(codec.mimeType))]);
+    videoTransceiver.setCodecPreferences([...videoCodec, ...RTCRtpSender.getCapabilities("video").codecs.filter(codec => !/H264/i.test(codec.mimeType))]);
   }
-  const sender = pc.getSenders().find(item => item.track?.kind === "video");
+  const sender = videoTransceiver.sender;
   if (sender) {
     try {
       const params = sender.getParameters();
@@ -299,53 +299,103 @@ function startCanvasCapture() {
   return captured;
 }
 
-async function startCapture(source) {
-  stopCapture();
-  if (source === "canvas") stream = startCanvasCapture();
-  else {
-    const captureOptions = { video: { frameRate: 60 }, audio: true, systemAudio: "include", surfaceSwitching: "include", selfBrowserSurface: "include" };
-    stream = await navigator.mediaDevices.getDisplayMedia(captureOptions);
+function hasLiveVideoTrack() {
+  return Boolean(stream?.getVideoTracks().some(track => track.readyState === "live"));
+}
+
+function updateCaptureButton() {
+  const available = Boolean(roomInfo) && !hasLiveVideoTrack();
+  resumeButton.hidden = !available;
+  resumeButton.disabled = !available;
+  if (available) resumeButton.textContent = stream ? "Resume capture" : "Start capture";
+  if (roomInfo) {
+    startButton.textContent = "Room active";
+    startButton.disabled = true;
   }
-  for (const track of stream.getTracks()) if (track.kind === "video") track.contentHint = "motion";
-  preview.srcObject = stream;
-  stream.getVideoTracks()[0]?.addEventListener("ended", () => status("Capture ended. Resume capture to continue.", true));
+}
+
+function stopStream(target) {
+  if (!target) return;
+  try { target._oscillator?.stop(); } catch { /* already stopped */ }
+  target._audioContext?.close().catch(() => {});
+  target.getTracks().forEach(track => track.stop());
+}
+
+async function startCapture(source) {
+  const previousStream = stream;
+  let nextStream;
+  if (source === "canvas") {
+    if (canvasTimer) clearInterval(canvasTimer);
+    canvasTimer = null;
+    nextStream = startCanvasCapture();
+  } else {
+    const captureOptions = { video: { frameRate: 60 }, audio: true, systemAudio: "include", surfaceSwitching: "include", selfBrowserSurface: "include" };
+    nextStream = await navigator.mediaDevices.getDisplayMedia(captureOptions);
+    if (canvasTimer) clearInterval(canvasTimer);
+    canvasTimer = null;
+  }
+  const videoTrack = nextStream.getVideoTracks()[0];
+  if (!videoTrack) {
+    stopStream(nextStream);
+    throw new Error("Capture did not provide a video track");
+  }
+  for (const track of nextStream.getTracks()) if (track.kind === "video") track.contentHint = "motion";
+  stream = nextStream;
+  preview.srcObject = nextStream;
+  videoTrack.addEventListener("ended", () => {
+    if (stream !== nextStream) return;
+    updateCaptureButton();
+    status("Capture ended. Resume capture to continue.", true);
+  });
+  try {
+    await Promise.all([...peers.values()].map(peer => peer.videoSender?.replaceTrack(videoTrack)));
+  } catch (error) {
+    stream = previousStream;
+    preview.srcObject = previousStream;
+    const previousVideoTrack = previousStream?.getVideoTracks()[0] || null;
+    await Promise.all([...peers.values()].map(peer => peer.videoSender?.replaceTrack(previousVideoTrack).catch(() => {})));
+    stopStream(nextStream);
+    updateCaptureButton();
+    throw error;
+  }
+  if (previousStream && previousStream !== nextStream) stopStream(previousStream);
+  updateCaptureButton();
+  return nextStream;
 }
 
 function stopCapture() {
   if (canvasTimer) clearInterval(canvasTimer);
   canvasTimer = null;
-  if (stream) {
-    stream._oscillator?.stop();
-    stream._audioContext?.close().catch(() => {});
-    stream.getTracks().forEach(track => track.stop());
-  }
+  const previousStream = stream;
   stream = null;
   preview.srcObject = null;
+  stopStream(previousStream);
+  updateCaptureButton();
 }
 
-async function createRoom({ existing = false } = {}) {
+async function createRoom() {
   startButton.disabled = true;
   try {
-    if (existing) {
-      const stored = JSON.parse(sessionStorage.getItem(STORAGE_KEY));
-      roomInfo = stored;
-      renderLinks(stored.slots);
-    } else {
-      roomInfo = await api("/api/rooms", { method: "POST", body: "{}" });
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(roomInfo));
-      renderLinks(roomInfo.slots);
-    }
-    await startCapture(sourceSelect.value);
+    roomInfo = await api("/api/rooms", { method: "POST", body: "{}" });
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(roomInfo));
+    renderLinks(roomInfo.slots);
     connectSidecar();
     connectSignaling(roomInfo);
-    resumeButton.hidden = true;
-    startButton.textContent = "Room active";
-    status(`Room ${roomInfo.room} ready. Share a guest link.`);
+    updateCaptureButton();
+    status(`Room ${roomInfo.room} created. Start capture to stream video.`);
   } catch (error) {
     status(error.message, true);
     startButton.disabled = false;
-    if (roomInfo) resumeButton.hidden = false;
   }
+}
+
+function reattachRoom(room) {
+  roomInfo = room;
+  renderLinks(roomInfo.slots);
+  connectSidecar();
+  connectSignaling(roomInfo);
+  updateCaptureButton();
+  status(`Room ${roomInfo.room} reattached. Start capture to stream video.`);
 }
 
 startButton.addEventListener("click", () => createRoom());
@@ -354,9 +404,11 @@ resumeButton.addEventListener("click", async () => {
     await startCapture(sourceSelect.value);
     connectSidecar();
     if (!signaling || signaling.readyState > WebSocket.OPEN) connectSignaling(roomInfo);
-    resumeButton.hidden = true;
-    status("Capture resumed; room reattached.");
-  } catch (error) { status(error.message, true); }
+    status("Capture resumed; room ready.");
+  } catch (error) {
+    updateCaptureButton();
+    status(error.message, true);
+  }
 });
 sourceSelect.addEventListener("change", () => {
   const url = new URL(location.href);
@@ -398,21 +450,17 @@ try {
     startCapture("canvas").then(() => { connectSidecar(); connectSignaling(roomInfo); status("Harness room attached."); }).catch(error => status(error.message, true));
   }
   const saved = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || "null");
-  if (saved?.room && saved?.roomToken && Array.isArray(saved.slots)) {
-    roomInfo = saved;
-    renderLinks(saved.slots);
-    startButton.textContent = "Reattach room";
-    resumeButton.hidden = false;
-    createRoom({ existing: true });
-  }
+  if (saved?.room && saved?.roomToken && Array.isArray(saved.slots)) reattachRoom(saved);
 } catch { sessionStorage.removeItem(STORAGE_KEY); }
 
 window.__smashHostStats = () => ({
+  room: roomInfo?.room || null,
+  signalingState: signaling?.readyState ?? null,
   frame: canvasFrame,
   timestamp: canvasTimestamp,
-  video: { frame: canvasFrame, timestamp: canvasTimestamp, captured: Boolean(stream?.getVideoTracks().length) },
+  video: { frame: canvasFrame, timestamp: canvasTimestamp, captured: hasLiveVideoTrack() },
   slots: Object.fromEntries([...statuses].map(([port, value]) => [port, { ...value }])),
-  peers: Object.fromEntries([...peers].map(([port, peer]) => [port, { state: peer.pc.connectionState, dataChannel: peer.channel?.readyState, rtcStats: peerRtcStats.get(port) || [], summary: rtcStats.get(port) || null }])),
+  peers: Object.fromEntries([...peers].map(([port, peer]) => [port, { state: peer.pc.connectionState, dataChannel: peer.channel?.readyState, videoTrackId: peer.videoSender?.track?.id || null, rtcStats: peerRtcStats.get(port) || [], summary: rtcStats.get(port) || null }])),
   rtcStats: [...peers.keys()].flatMap(port => (peerRtcStats.get(port) || []).map(report => ({ ...report, port }))),
   capturedTracks: stream?.getTracks().map(track => ({ kind: track.kind, readyState: track.readyState, contentHint: track.contentHint })) || [],
   source: sourceSelect.value,
