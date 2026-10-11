@@ -11,6 +11,8 @@ Local Smash 64 streaming/input prototype with a native game, OSI1 sidecar, signa
 5. Open `http://localhost:8787/host`, keep Capture source set to **Game window / screen**, click **Create room**, then share each guest's own link. The sidecar stays on the host Mac at loopback.
 6. For a temporary remote link, run `./server/tunnel.sh` and share the P2 link. Stop the tunnel when the session ends. It carries signaling only; WebRTC media tries a direct peer connection using public STUN, with no TURN relay.
 
+To stop a detached session started under `/tmp/smash-live`, run `./scripts/stop-live.sh`.
+
 ## Controls and limits
 
 Guests use a keyboard or standard gamepad. P1 uses the focused game-window keyboard: W/A/S/D or arrows, J for A, K for B, L for Z, Space/Return for Start. See [game controls](game/README.md). The DW4 harness drove P1 through the local sidecar test hook and P2 through the guest WebRTC data channel.
