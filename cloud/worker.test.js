@@ -13,15 +13,15 @@ let dev;
 
 test.before(async () => {
   execFileSync("node", [join(here, "build-assets.mjs")]);
-  dev = spawn("npx", ["wrangler", "dev", "--local", "--port", String(PORT), "--persist-to", join(here, ".wrangler", `test-${PORT}`)], { cwd: here, stdio: ["ignore", "pipe", "pipe"] });
-  const deadline = Date.now() + 40_000;
+  dev = spawn("npx", ["wrangler", "dev", "--local", "--port", String(PORT), "--persist-to", join(here, ".wrangler", `test-${PORT}`)], { cwd: here, stdio: ["ignore", "pipe", "pipe"], detached: true });
+  const deadline = Date.now() + 90_000;
   for (;;) {
     try { if ((await fetch(`${origin}/healthz`)).ok) break; } catch { /* not ready */ }
     if (Date.now() > deadline) throw new Error("wrangler dev did not start");
     await new Promise((resolve) => setTimeout(resolve, 300));
   }
 });
-test.after(() => { dev?.kill("SIGTERM"); });
+test.after(() => { try { process.kill(-dev.pid, "SIGTERM"); } catch { /* already gone */ } });
 
 const createRoom = async () => (await fetch(`${origin}/api/rooms`, { method: "POST" })).json();
 const connect = (query) => new WebSocket(`${origin.replace("http", "ws")}/ws?${new URLSearchParams(query)}`);
