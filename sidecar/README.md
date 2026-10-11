@@ -34,3 +34,5 @@ The command after `pad-helper:` runs as a shell command. It should write newline
 - Shutdown writes one final all-neutral snapshot. The process leaves that file in place for the launcher to read.
 
 Run focused tests with `node --test sidecar/index.test.js`, then the project suite with `npm test`.
+
+`--mute` writes OSI1 byte 4 = 1 so the game is silent (default off); `{type:"mute",value:bool}` on the WebSocket toggles it at runtime.

@@ -158,3 +158,22 @@ test("clean shutdown writes a final neutral snapshot", (t) => {
   sidecar.close();
   assert.deepEqual(decodeOSI1(fs.readFileSync(file)).ports, Array.from({ length: 4 }, () => ({ kind: 0, enabled: 0, buttons: 0, sx: 0, sy: 0 })));
 });
+
+test("mute byte is 0 by default, 1 with mute, and toggles over the WebSocket", async (t) => {
+  const { file } = fixture(t);
+  const plain = new Sidecar({ file }).start();
+  assert.equal(fs.readFileSync(file)[4], 0);
+  plain.close();
+  const sidecar = new Sidecar({ file, mute: true }).start();
+  t.after(() => sidecar.close());
+  assert.equal(fs.readFileSync(file)[4], 1);
+  const server = createSidecarServer(sidecar, { port: 0 });
+  const address = await server.listen();
+  t.after(() => server.close());
+  const ws = new WebSocket(`ws://127.0.0.1:${address.port}`);
+  await new Promise((resolve) => ws.once("message", resolve));
+  ws.send(JSON.stringify({ type: "mute", value: false }));
+  await sleep(50);
+  assert.equal(decodeOSI1(fs.readFileSync(file)).mute, 0);
+  ws.close();
+});
