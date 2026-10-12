@@ -11,10 +11,11 @@ const DEFAULT_TIMEOUT_MS = 500; // class default (contract); the CLI passes a lo
 const neutral = () => ({ kind: KINDS.DISCONNECTED, enabled: 0, buttons: 0, sx: 0, sy: 0 });
 
 export class Sidecar {
-  constructor({ file, p1 = "keyboard", mute = false, inputTimeoutMs = DEFAULT_TIMEOUT_MS, now = Date.now, onError = console.error }) {
+  constructor({ file, p1 = "keyboard", mute = false, inputTimeoutMs = DEFAULT_TIMEOUT_MS, rosterPageFile = null, now = Date.now, onError = console.error }) {
     if (!file) throw new TypeError("an OSI1 file path is required");
     this.file = path.resolve(file);
     this.now = now;
+    this.rosterPageFile = rosterPageFile; // character-select page jumps for the native game (see cloud/vm/roster-page.patch)
     this.timeoutMs = inputTimeoutMs; // silence longer than this neutralizes a guest; shorter stalls hold the last input
     this.onError = onError;
     this.seq = 0;
@@ -108,6 +109,14 @@ export class Sidecar {
     connection.timeout.unref?.();
   }
 
+  // The game polls this file ("<seq> <page>"); a new seq is a page request, like the web shell's search dialog.
+  requestRosterPage(page, client) {
+    if (!this.rosterPageFile) return this.reject(client, "roster_unavailable", "this sidecar has no roster page file");
+    if (!Number.isInteger(page) || page < 0 || page > 4096) return this.reject(client, "invalid_page", "page must be an integer from 0 to 4095");
+    try { fs.writeFileSync(this.rosterPageFile, `${Date.now()} ${page}\n`); }
+    catch (error) { this.onError(error); }
+  }
+
   reject(client, code, message) { client?.sendJson({ type: "error", code, message }); }
 
   setP1(input) {
@@ -191,6 +200,7 @@ export function createSidecarServer(sidecar, { port = 8765, host = "127.0.0.1" }
       if (message.type === "slot:connect") sidecar.connect(message.port, message.connectionId, client);
       else if (message.type === "slot:input") sidecar.input(message.port, message.connectionId, message.input, client);
       else if (message.type === "mute" && typeof message.value === "boolean") { sidecar.mute = message.value; sidecar.writeSnapshot(); }
+      else if (message.type === "roster:page") sidecar.requestRosterPage(message.page, client);
       else if (message.type === "slot:disconnect") sidecar.disconnect(message.port, message.connectionId, client);
       else sidecar.reject(client, "unknown_type", "unsupported message type");
     });
@@ -214,13 +224,14 @@ export function createSidecarServer(sidecar, { port = 8765, host = "127.0.0.1" }
 }
 
 function parseArgs(argv) {
-  const args = { file: null, port: 8765, p1: "keyboard", mute: false, inputTimeoutMs: 2500 };
+  const args = { file: null, port: 8765, p1: "keyboard", mute: false, inputTimeoutMs: 2500, rosterPageFile: null };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--file") args.file = argv[++i];
     else if (argv[i] === "--port") args.port = Number(argv[++i]);
     else if (argv[i] === "--p1") args.p1 = argv[++i];
     else if (argv[i] === "--mute") args.mute = true;
     else if (argv[i] === "--input-timeout-ms") args.inputTimeoutMs = Number(argv[++i]);
+    else if (argv[i] === "--roster-page-file") args.rosterPageFile = argv[++i];
     else throw new Error(`unknown option: ${argv[i]}`);
   }
   if (!args.file) throw new Error("usage: node sidecar/index.js --file <path> [--port 8765] [--p1 pad-helper:<cmd>] [--mute] [--input-timeout-ms 2500]");
@@ -234,7 +245,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   try {
     const args = parseArgs(process.argv.slice(2));
     const p1 = args.p1.startsWith("pad-helper:") ? args.p1 : args.p1;
-    const sidecar = new Sidecar({ file: args.file, p1, mute: args.mute, inputTimeoutMs: args.inputTimeoutMs }).start();
+    const sidecar = new Sidecar({ file: args.file, p1, mute: args.mute, inputTimeoutMs: args.inputTimeoutMs, rosterPageFile: args.rosterPageFile }).start();
     if (p1.startsWith("pad-helper:")) sidecar.startHelper(p1.slice("pad-helper:".length));
     const server = createSidecarServer(sidecar, { port: args.port });
     server.listen().then((address) => console.log(`sidecar listening on ws://${address.address}:${address.port}`)).catch((error) => { console.error(error); process.exitCode = 1; sidecar.close(); });

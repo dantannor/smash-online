@@ -6,7 +6,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
 FILE="${OPENSMASH_LAUNCHER_INPUT:?}"
 for _ in $(seq 1 60); do [[ -s "$FILE" ]] && break; sleep 1; done
 ino="$(stat -c %i "$FILE")"
-node "$ROOT/sidecar/index.js" --file "$FILE" --port 8765 &   # not muted: the game audio goes to the PulseAudio null sink
+node "$ROOT/sidecar/index.js" --file "$FILE" --port 8765 --roster-page-file "$(dirname "$FILE")/roster-page" &   # not muted: the game audio goes to the PulseAudio null sink
 pid=$!
 trap 'kill "$pid" 2>/dev/null; wait "$pid"; exit 0' TERM INT
 while kill -0 "$pid" 2>/dev/null; do

@@ -1,4 +1,7 @@
 import test from "node:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { WebSocket } from "ws";
@@ -166,4 +169,18 @@ test("p1Guest rooms add a P1 slot that joins and relays; default rooms have no P
   assert.equal((await join(plain, withP1.slots[0].slotToken)).status, 403);
   const rejected = connect(ctx.origin, { room: plain.room, role: "guest", port: 1, token: withP1.slots[0].slotToken });
   assert.equal((await nextMessage(rejected)).code, "UNAUTHORIZED");
+});
+
+test("/roster.json lists the originals and the staged custom fighters", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "roster-"));
+  const file = path.join(dir, "characters.json");
+  fs.writeFileSync(file, JSON.stringify({ characters: [{ name: "A Person", base: "Mario", page: 1 }, { name: "B Person", base: "Fox", page: 1 }] }));
+  process.env.SMASH_ROSTER_JSON = file;
+  t.after(() => { delete process.env.SMASH_ROSTER_JSON; fs.rmSync(dir, { recursive: true, force: true }); });
+  const ctx = await setup(); t.after(ctx.close);
+  const body = await (await fetch(`${ctx.origin}/roster.json`)).json();
+  assert.equal(body.originals.length, 12);
+  assert.deepEqual(body.custom, [{ name: "A Person", base: "Mario", page: 1 }, { name: "B Person", base: "Fox", page: 1 }]);
+  delete process.env.SMASH_ROSTER_JSON;
+  assert.deepEqual((await (await fetch(`${ctx.origin}/roster.json`)).json()).custom, []);
 });

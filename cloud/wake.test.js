@@ -14,7 +14,7 @@ const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 20
 const saJson = JSON.stringify({ client_email: "wake@test.iam.gserviceaccount.com", private_key: privateKey.export({ type: "pkcs8", format: "pem" }) });
 
 // Stub of the Compute API and the OAuth token endpoint.
-const gcp = { status: "TERMINATED", lastStart: new Date(0).toISOString(), starts: 0, tokens: 0, badJwt: 0 };
+const gcp = { status: "TERMINATED", lastStart: new Date(0).toISOString(), starts: 0, resumes: 0, suspends: 0, tokens: 0, badJwt: 0 };
 let stub, dev;
 test.before(async () => {
   stub = createServer((req, res) => {
@@ -33,6 +33,8 @@ test.before(async () => {
     const base = "/compute/v1/projects/proj/zones/zone/instances/vm";
     if (req.method === "GET" && url.pathname === base) { res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ status: gcp.status, lastStartTimestamp: gcp.lastStart })); return; }
     if (req.method === "POST" && url.pathname === `${base}/start`) { gcp.starts++; gcp.status = "RUNNING"; gcp.lastStart = new Date().toISOString(); res.writeHead(200, { "content-type": "application/json" }).end("{}"); return; }
+    if (req.method === "POST" && url.pathname === `${base}/resume`) { gcp.resumes++; gcp.status = "RUNNING"; gcp.lastStart = new Date().toISOString(); res.writeHead(200, { "content-type": "application/json" }).end("{}"); return; }
+    if (req.method === "POST" && url.pathname === `${base}/suspend`) { gcp.suspends++; gcp.status = "SUSPENDED"; res.writeHead(200, { "content-type": "application/json" }).end("{}"); return; }
     res.writeHead(404).end("{}");
   });
   await new Promise((resolve) => stub.listen(0, "127.0.0.1", resolve));
@@ -53,7 +55,7 @@ test.after(() => { try { process.kill(-dev.pid, "SIGTERM"); } catch { /* gone */
 const get = (path) => fetch(`${origin}${path}`, { redirect: "manual" });
 const status = async (path) => (await get(path)).json();
 const register = (body, token = VM) => fetch(`${origin}/api/vm/register`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(body) });
-const reg = (boot) => ({ room: "room1", boot, slots: [1, 2, 3, 4].map((port) => ({ port, slotToken: `tok${port}` })) });
+const reg = (boot = 0) => ({ room: "room1", boot, slots: [1, 2, 3, 4].map((port) => ({ port, slotToken: `tok${port}` })) });
 
 test("wrong secrets get 404 and the VM stays down", async () => {
   assert.equal((await get("/go/nope")).status, 404);
@@ -111,9 +113,9 @@ test("registration is authenticated; a fresh registration makes P1 and friends r
   assert.notEqual((await get(`/p/${FRIEND}/1`)).status, 302, "port 1 is not a friend slot");
 });
 
-test("a registration from a previous boot is stale, and a stopped VM is down again", async () => {
-  gcp.lastStart = new Date().toISOString();
-  await register(reg(Math.floor(Date.now() / 1000) - 3600));
+test("a registration that predates the current run is stale; stopped is down and gets started", async () => {
+  await register(reg());
+  gcp.status = "RUNNING"; gcp.lastStart = new Date(Date.now() + 60_000).toISOString(); // the VM (re)started after that registration
   assert.equal((await status(`/go/${P1}/status`)).state, "starting");
   gcp.status = "TERMINATED";
   assert.equal((await status(`/p/${FRIEND}/2/status`)).state, "down");
@@ -123,4 +125,23 @@ test("a registration from a previous boot is stale, and a stopped VM is down aga
   gcp.status = "STOPPING";
   assert.equal((await status(`/go/${P1}/status?wake=1`)).state, "stopping");
   assert.equal(gcp.starts, startsBefore + 1, "never starts while still stopping");
+});
+
+test("a suspended VM is resumed (not started) by the P1 link only, and idle suspend is authenticated", async () => {
+  gcp.status = "SUSPENDED";
+  assert.equal((await status(`/p/${FRIEND}/2/status`)).state, "down");
+  assert.equal((await status(`/go/${P1}/status`)).state, "down");
+  assert.equal(gcp.resumes, 0);
+  const starts = gcp.starts;
+  assert.equal((await status(`/go/${P1}/status?wake=1`)).state, "starting");
+  assert.equal(gcp.resumes, 1); assert.equal(gcp.starts, starts, "resume, not start");
+  await register(reg());
+  assert.equal((await status(`/go/${P1}/status`)).state, "ready");
+  const suspend = token => fetch(`${origin}/api/vm/suspend`, { method: "POST", headers: { authorization: `Bearer ${token}` } });
+  assert.equal((await suspend("wrong")).status, 403);
+  assert.equal(gcp.suspends, 0);
+  assert.equal((await suspend(VM)).status, 200);
+  assert.equal(gcp.suspends, 1);
+  assert.equal((await status(`/go/${P1}/status`)).state, "down", "registration cleared and VM suspended");
+  assert.equal((await suspend(VM)).status, 409, "only a running VM can be suspended");
 });

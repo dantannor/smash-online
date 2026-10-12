@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run Smash Online on a Google Cloud VM (Tel Aviv) instead of the Mac. See README "Running on Google Cloud".
 #   scripts/cloud.sh up       create/start the VM, wait until a room exists, print the P1-P4 links
-#   scripts/cloud.sh down     stop the VM (the disk is kept)
+#   scripts/cloud.sh down     suspend the VM (memory and disk are kept; `down --stop` powers it off instead)
 #   scripts/cloud.sh status   VM state, services, guests, idle-shutdown settings
 #   scripts/cloud.sh links    print the permanent P1 and friend URLs (links --live: the current room's links)
 #   scripts/cloud.sh secrets <gcp-key.json>   generate the permanent-link secrets and store them as Worker secrets
@@ -95,7 +95,7 @@ provision() { # first run: dependencies, ROM, game build, roster, services (take
   sync_repo
   say "uploading the ROM to the VM (it goes nowhere else)"
   scp -F "$SSH_CONF" "$ROM" smash-vm:rom.z64 && vssh 'chmod 600 ~/rom.z64'
-  vssh 'cd ~/smash-online/cloud/vm && sudo ./install-deps.sh > ~/provision.log 2>&1 && ./build-game.sh >> ~/provision.log 2>&1 && cd ~/smash-online && (test -d node_modules/ws || npm install --no-save --no-package-lock --ignore-scripts ws@8.22.0 >> ~/provision.log 2>&1) && ./scripts/stage-roster.sh >> ~/provision.log 2>&1 && echo PROVISION-OK >> ~/provision.log' \
+  vssh 'cd ~/smash-online/cloud/vm && sudo ./install-deps.sh > ~/provision.log 2>&1 && ./build-game.sh >> ~/provision.log 2>&1 && cd ~/smash-online && (test -d node_modules/ws || npm install --no-save --no-package-lock --ignore-scripts ws@8.22.0 >> ~/provision.log 2>&1) && SMASH_ROSTER_COUNT=all ./scripts/stage-roster.sh >> ~/provision.log 2>&1 && echo PROVISION-OK >> ~/provision.log' \
     || { echo "provisioning failed; see ~/provision.log on the VM (scripts/cloud.sh ssh tail -50 provision.log)" >&2; exit 1; }
   vssh 'sudo ~/smash-online/cloud/vm/install-services.sh'
 }
@@ -103,10 +103,21 @@ need_provision() { ! vssh 'test -x ~/Projects/smash-online-build/src/BattleShip/
 
 push_vm_secret() { # lets the VM register its room with the Worker (Bearer VM_SECRET); stdin keeps it off the command line
   [[ -r "$PERM" ]] || return 0
-  ( . "$PERM"; printf '%s' "$VM_SECRET" ) | vssh 'read -r s; sudo sed -i "s|^SMASH_VM_SECRET=.*|SMASH_VM_SECRET=$s|" /etc/smash-online.env; sudo chgrp smash /etc/smash-online.env; sudo chmod 640 /etc/smash-online.env; sudo systemctl restart smash-ctl' >/dev/null 2>&1 || true
+  ( . "$PERM"; printf '%s' "$VM_SECRET" ) | vssh 'read -r s; [ "$(grep "^SMASH_VM_SECRET=" /etc/smash-online.env | cut -d= -f2)" = "$s" ] && exit 0; sudo sed -i "s|^SMASH_VM_SECRET=.*|SMASH_VM_SECRET=$s|" /etc/smash-online.env; sudo chgrp smash /etc/smash-online.env; sudo chmod 640 /etc/smash-online.env; sudo systemctl restart smash-ctl' >/dev/null 2>&1 || true
 }
 status_json() { # prints the controller status JSON, or nothing
   gci get-guest-attributes "$VM" --query-path=smash/status --format='value(value)' 2>/dev/null || true
+}
+ready_json() { # prints the status JSON once this run's room is registered with the Worker and published; $1 = start time floor
+  local json room
+  json="$(status_json)"; [[ -n "$json" ]] || return 1
+  if [[ -r "$PERM" ]]; then # a resumed VM keeps an old boot time: the Worker's fresh registration is the proof the room is current
+    room="$( . "$PERM"; curl -fsS -m 8 "$WORKER_ORIGIN/go/$P1_SECRET/status" 2>/dev/null | node -e 'const s=JSON.parse(require("fs").readFileSync(0,"utf8")); if(s.state!=="ready")process.exit(1); console.log(new URL(s.url).searchParams.get("room"))' )" || return 1
+    echo "$json" | ROOM="$room" node -e 'const s=JSON.parse(require("fs").readFileSync(0,"utf8")); process.exit(s.ready && s.room===process.env.ROOM && s.links.length>=4 ? 0 : 1)' || return 1
+  else
+    echo "$json" | node -e 'const s=JSON.parse(require("fs").readFileSync(0,"utf8")); process.exit(s.ready && s.boot >= '"$1"' - 30 && s.links.length >= 4 ? 0 : 1)' || return 1
+  fi
+  echo "$json"
 }
 print_links() { # stdin: status JSON
   node -e '
@@ -119,7 +130,8 @@ cmd_up() {
   ensure_key; ensure_firewall
   case "$st" in
     MISSING) create_vm ;;
-    TERMINATED|STOPPED|SUSPENDED) say "starting $VM"; gci start "$VM" >/dev/null ;;
+    TERMINATED|STOPPED) say "starting $VM"; gci start "$VM" >/dev/null ;;
+    SUSPENDED) say "resuming $VM"; gci resume "$VM" >/dev/null ;;
     RUNNING|PROVISIONING|STAGING) say "$VM already $st" ;;
     *) echo "unexpected VM state: $st" >&2; exit 1 ;;
   esac
@@ -131,9 +143,8 @@ cmd_up() {
   say "waiting for a room with live capture"
   local end=$((SECONDS + 420)) json=""
   while ((SECONDS < end)); do
-    json="$(status_json)"
-    if [[ -n "$json" ]] && echo "$json" | node -e 'const s=JSON.parse(require("fs").readFileSync(0,"utf8")); process.exit(s.ready && s.boot >= '"$boot_floor"' - 30 && s.links.length >= 4 ? 0 : 1)' 2>/dev/null; then break; fi
-    json=""; sleep 5
+    json="$(ready_json "$boot_floor")" && break
+    json=""; sleep 3
   done
   [[ -n "$json" ]] || { echo "services did not become healthy; try: scripts/cloud.sh status" >&2; exit 1; }
   say "up in $((SECONDS - t0)) s"
@@ -141,7 +152,12 @@ cmd_up() {
   [[ -r "$PERM" ]] && { echo "Permanent links:"; cmd_links; }
   echo "Idle shutdown: see 'scripts/cloud.sh status'. Stop billing now with: scripts/cloud.sh down"
 }
-cmd_down() { say "stopping $VM"; gci stop "$VM" --quiet >/dev/null; say "stopped (disk kept)"; }
+cmd_down() {
+  if [[ "${1:-}" == --stop ]] || ! gci suspend "$VM" --quiet >/dev/null 2>&1; then
+    [[ "${1:-}" == --stop ]] || say "suspend failed, powering off instead"
+    gci stop "$VM" --quiet >/dev/null; say "stopped (disk kept)"
+  else say "suspended (memory and disk kept; resumes in about 12 s)"; fi
+}
 cmd_secrets() {
   local key="${1:-}"; [[ -f "$key" ]] || { echo "usage: cloud.sh secrets <gcp-service-account-key.json>" >&2; exit 64; }
   if [[ ! -f "$PERM" ]]; then
@@ -173,7 +189,7 @@ cmd_status() {
 with_vm() { [[ "$(vm_status)" == RUNNING ]] || { echo "VM is not running" >&2; exit 1; }; write_ssh_config "$(vm_ip)"; }
 case "${1:-}" in
   up) cmd_up ;;
-  down) cmd_down ;;
+  down) shift; cmd_down "$@" ;;
   status) cmd_status ;;
   links) shift; cmd_links "$@" ;;
   secrets) shift; cmd_secrets "$@" ;;

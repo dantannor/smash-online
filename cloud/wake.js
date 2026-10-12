@@ -43,25 +43,32 @@ async function gcp(env, path, init = {}) {
 }
 export const getInstance = (env) => gcp(env, "");
 export const startInstance = (env) => gcp(env, "/start", { method: "POST" });
+export const resumeInstance = (env) => gcp(env, "/resume", { method: "POST" });
+export const suspendInstance = (env) => gcp(env, "/suspend", { method: "POST" });
 
 // ---- state -----------------------------------------------------------------------------------------------
 const registry = (env) => env.REGISTRY.get(env.REGISTRY.idFromName("vm"));
-const DOWN = new Set(["TERMINATED", "STOPPED", "SUSPENDED"]);
+const STOPPED = new Set(["TERMINATED", "STOPPED"]);
+// The VM re-registers its room every minute; a registration older than this means it is not running our session (it was
+// suspended, powered off, or crashed), whatever the instance status says.
+const FRESH_MS = 150_000;
 
 // -> { state: "down" | "stopping" | "starting" | "ready", slots?: {port: slotToken}, room? }
+// "down" covers stopped and suspended VMs; with wake=true a stopped VM is started and a suspended one resumed.
 export async function vmState(env, { wake = false } = {}) {
-  let instance = await getInstance(env);
-  if (DOWN.has(instance.status)) {
+  const instance = await getInstance(env);
+  const asleep = STOPPED.has(instance.status) || instance.status === "SUSPENDED";
+  if (asleep) {
     if (!wake) return { state: "down" };
-    await registry(env).clear();           // never hand out a previous boot's room
-    await startInstance(env);
+    await registry(env).clear();           // never hand out a previous run's room
+    if (instance.status === "SUSPENDED") await resumeInstance(env); else await startInstance(env);
     return { state: "starting" };
   }
   if (instance.status === "STOPPING" || instance.status === "SUSPENDING") return { state: "stopping" };
   if (instance.status !== "RUNNING") return { state: "starting" };
   const current = await registry(env).current();
-  const started = Date.parse(instance.lastStartTimestamp || "") / 1000;
-  if (!current || !(current.boot >= started - 60)) return { state: "starting" };
+  const started = Date.parse(instance.lastStartTimestamp || "") || 0;
+  if (!current || current.at < Date.now() - FRESH_MS || current.at < started) return { state: "starting" };
   return { state: "ready", room: current.room, slots: current.slots };
 }
 const playUrl = (origin, room, token) => `${origin}/play?room=${encodeURIComponent(room)}&slot=${encodeURIComponent(token)}`;
@@ -78,7 +85,7 @@ async function tick() {
     const secs = Math.round((Date.now() - started) / 1000);
     el.textContent = s.message + " (" + secs + " s)";
   } catch { el.textContent = "Connection hiccup, retrying…"; }
-  setTimeout(tick, 2000);
+  setTimeout(tick, 1000);
 }
 tick();
 </script>`;
@@ -89,11 +96,18 @@ function waitPage({ title, message, statusUrl, extra = "" }) {
 // ---- routes ----------------------------------------------------------------------------------------------
 export async function handleWake(request, env, url) {
   const origin = url.origin;
-  if (url.pathname === "/api/vm/register" || url.pathname === "/api/vm/clear") {
+  if (url.pathname === "/api/vm/register" || url.pathname === "/api/vm/clear" || url.pathname === "/api/vm/suspend") {
     if (request.method !== "POST") return json(405, { error: "method" });
     const bearer = (request.headers.get("authorization") || "").replace(/^Bearer /, "");
     if (!(await sameSecret(bearer, env.VM_SECRET))) return json(403, { error: "forbidden" });
     if (url.pathname === "/api/vm/clear") { await registry(env).clear(); return json(200, { ok: true }); }
+    if (url.pathname === "/api/vm/suspend") { // the idle VM asks to be suspended: it has no cloud credentials of its own
+      const instance = await getInstance(env).catch(() => null);
+      if (instance?.status !== "RUNNING") return json(409, { error: "not running" });
+      await registry(env).clear();
+      await suspendInstance(env);
+      return json(200, { ok: true });
+    }
     const body = await request.json().catch(() => null);
     const slots = Object.fromEntries((Array.isArray(body?.slots) ? body.slots : []).filter((s) => [1, 2, 3, 4].includes(s?.port) && typeof s?.slotToken === "string").map((s) => [s.port, s.slotToken]));
     if (typeof body?.room !== "string" || !Number.isFinite(body?.boot) || !Object.keys(slots).length) return json(400, { error: "bad registration" });

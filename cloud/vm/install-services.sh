@@ -9,6 +9,8 @@ setdef SMASH_SIGNAL_ORIGIN https://smash-online.reddit-service-site.workers.dev
 # Idle shutdown: minutes with no guest since the services started, and minutes with no guest after a session has happened.
 setdef SMASH_BOOT_GRACE_MIN 30
 setdef SMASH_IDLE_MIN 15
+# What an idle VM does: "suspend" (asks the Worker, which holds the cloud credentials; resumes in about 12 s) or "poweroff".
+setdef SMASH_IDLE_ACTION suspend
 # Game window / capture size (the virtual screen is the same size) and video sender tuning (kbps).
 setdef SMASH_VIDEO_W 960
 setdef SMASH_VIDEO_H 720
@@ -88,7 +90,7 @@ unit smash-server <<C
 Description=Smash Online local server (host page)
 [Service]
 User=$U
-Environment=PORT=8787 HOST=127.0.0.1
+Environment=PORT=8787 HOST=127.0.0.1 SMASH_ROSTER_JSON=$HOME_DIR/Projects/smash-online-build/roster/characters.json
 ExecStart=/usr/local/bin/node $REPO/server/index.js
 Restart=always
 [Install]
@@ -137,4 +139,5 @@ C
 systemctl daemon-reload
 systemctl enable smash-pulse smash-xvfb smash-game smash-sidecar smash-server smash-chrome smash-ctl >/dev/null 2>&1
 systemctl restart smash-pulse smash-xvfb smash-game smash-sidecar smash-server smash-chrome smash-ctl
+"$(dirname "$0")/trim-boot.sh"
 echo SERVICES-INSTALLED
