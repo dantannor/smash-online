@@ -145,3 +145,25 @@ test("SMASH_SIGNAL_ORIGIN makes /host open in remote-signaling mode", async (t) 
   assert.equal(redirect.headers.get("location"), "/host?signal=https%3A%2F%2Fsignal.example.test");
   assert.equal((await fetch(`${ctx.origin}/host?signal=https%3A%2F%2Fsignal.example.test`)).status, 200);
 });
+
+test("p1Guest rooms add a P1 slot that joins and relays; default rooms have no P1", async (t) => {
+  const ctx = await setup(); t.after(ctx.close);
+  const withP1 = await (await fetch(`${ctx.origin}/api/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ p1Guest: true }) })).json();
+  assert.deepEqual(withP1.slots.map((s) => s.port), [1, 2, 3, 4]);
+  const join = (room, slotToken) => fetch(`${ctx.origin}/api/rooms/${room.room}/join`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ slotToken }) });
+  const joined = await (await join(withP1, withP1.slots[0].slotToken)).json();
+  assert.equal(joined.port, 1);
+  const host = await opened(connect(ctx.origin, { room: withP1.room, role: "host", token: withP1.roomToken }));
+  const seen = nextMessage(host);
+  const guestSocket = connect(ctx.origin, { room: withP1.room, role: "guest", port: 1, token: withP1.slots[0].slotToken });
+  const guest = await opened(guestSocket);
+  assert.equal((await seen).port, 1);
+  host.send(JSON.stringify({ type: "offer", port: 1, sdp: "o" }));
+  assert.deepEqual(await nextMessage(guest), { type: "offer", port: 1, sdp: "o" });
+  await closeSocket(guest); await closeSocket(host);
+  const plain = await createRoom(ctx.origin);
+  assert.deepEqual(plain.slots.map((s) => s.port), [2, 3, 4]);
+  assert.equal((await join(plain, withP1.slots[0].slotToken)).status, 403);
+  const rejected = connect(ctx.origin, { room: plain.room, role: "guest", port: 1, token: withP1.slots[0].slotToken });
+  assert.equal((await nextMessage(rejected)).code, "UNAUTHORIZED");
+});

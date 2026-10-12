@@ -99,7 +99,7 @@ async function connect() {
     const joined = await response.json();
     if (ownGeneration !== generation) return;
     const port = Number(joined.port);
-    if (![2, 3, 4].includes(port)) throw new Error('Join returned an invalid slot');
+    if (![1, 2, 3, 4].includes(port)) throw new Error('Join returned an invalid slot');
     state.slot = port; state.port = port; slotLabel.textContent = `P${port}`;
     const wsUrl = new URL('/ws', location.href);
     wsUrl.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';

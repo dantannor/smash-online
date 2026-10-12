@@ -80,3 +80,19 @@ test("bad credentials and unknown rooms are rejected with a code", async () => {
   assert.equal((await nextMessage(connect({ room: "missing", role: "host", token: "x" }))).code, "ROOM_NOT_FOUND");
   assert.equal((await nextMessage(connect({ room: room.room, role: "host", token: "wrong" }))).code, "UNAUTHORIZED");
 });
+
+test("p1Guest rooms add a P1 slot that joins and relays; default rooms have no P1", async () => {
+  const withP1 = await (await fetch(`${origin}/api/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ p1Guest: true }) })).json();
+  assert.deepEqual(withP1.slots.map((s) => s.port), [1, 2, 3, 4]);
+  assert.equal((await (await joinSlot(withP1.room, withP1.slots[0].slotToken)).json()).port, 1);
+  const guest = await opened(connect({ room: withP1.room, role: "guest", port: 1, token: withP1.slots[0].slotToken }));
+  const host = connect({ room: withP1.room, role: "host", token: withP1.roomToken });
+  assert.equal((await nextMessage(host)).port, 1);
+  host.send(JSON.stringify({ type: "offer", port: 1, sdp: "o" }));
+  assert.deepEqual(await nextMessage(guest), { type: "offer", port: 1, sdp: "o" });
+  guest.close(); host.close();
+  const plain = await createRoom();
+  assert.deepEqual(plain.slots.map((s) => s.port), [2, 3, 4]);
+  assert.equal((await joinSlot(plain.room, withP1.slots[0].slotToken)).status, 403);
+  assert.equal((await nextMessage(connect({ room: plain.room, role: "guest", port: 1, token: withP1.slots[0].slotToken }))).code, "UNAUTHORIZED");
+});
