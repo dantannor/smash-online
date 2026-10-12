@@ -8,6 +8,7 @@
 #   scripts/cloud.sh sync     copy this checkout to the VM and restart the services
 #   scripts/cloud.sh newroom  restart the host page (new room, new links)
 #   scripts/cloud.sh idle <bootGraceMin> <idleMin>   change the idle-shutdown timeouts
+#   scripts/cloud.sh machine <type>   change the machine type (stops the VM; refuses while a guest is connected)
 #   scripts/cloud.sh ssh [cmd...]
 # Needs gcloud, already authenticated for the project (gcloud auth login, or activate-service-account).
 set -euo pipefail
@@ -199,6 +200,12 @@ case "${1:-}" in
   newroom) with_vm; vssh 'sudo systemctl restart smash-chrome' ;;
   idle) with_vm; [[ "${2:-}" =~ ^[0-9]+$ && "${3:-}" =~ ^[0-9]+$ ]] || { echo "usage: cloud.sh idle <bootGraceMin> <idleMin>" >&2; exit 64; }
         vssh "sudo sed -i -e 's/^SMASH_BOOT_GRACE_MIN=.*/SMASH_BOOT_GRACE_MIN=$2/' -e 's/^SMASH_IDLE_MIN=.*/SMASH_IDLE_MIN=$3/' /etc/smash-online.env && grep -E '^SMASH_(BOOT|IDLE)' /etc/smash-online.env" ;;
+  machine) [[ -n "${2:-}" ]] || { echo "usage: cloud.sh machine <type>" >&2; exit 64; }
+           if [[ "$(vm_status)" == RUNNING ]]; then
+             g="$(status_json | node -e 'try{console.log(JSON.parse(require("fs").readFileSync(0,"utf8")).guests)}catch{console.log(-1)}')"
+             [[ "$g" == 0 ]] || { echo "refusing: guests=$g (or unknown)" >&2; exit 1; }
+           fi
+           gci stop "$VM" --quiet >/dev/null 2>&1 || true; gci set-machine-type "$VM" --machine-type "$2" >/dev/null && say "machine type is now $2 (VM stopped; scripts/cloud.sh up starts it)" ;;
   ssh) shift; with_vm; vssh "$@" ;;
   *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 64 ;;
 esac

@@ -52,7 +52,7 @@ export async function sweepSleepers(env) {
   const instance = await getInstance(env);
   if (instance.status !== "SUSPENDED") return "not suspended";
   const since = Date.parse(instance.lastSuspendedTimestamp || "") || Date.now();
-  if (Date.now() - since < Number(env.SLEEP_STOP_MIN || 45) * 60_000) return "recently suspended";
+  if (Date.now() - since < Number(env.SLEEP_STOP_MIN || 30) * 60_000) return "recently suspended";
   await gcp(env, "/stop", { method: "POST" });
   await registry(env).logWake({ action: "sweep-stop", suspendedAt: instance.lastSuspendedTimestamp });
   return "stopped";
@@ -106,7 +106,7 @@ async function tick() {
     const secs = Math.round((Date.now() - started) / 1000);
     el.textContent = s.message + " (" + secs + " s)";
   } catch { el.textContent = "Connection hiccup, retrying…"; }
-  setTimeout(tick, 1000);
+  setTimeout(tick, 500);
 }
 tick();
 </script>`;

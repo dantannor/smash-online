@@ -47,4 +47,5 @@ VENV="$BUILD_ROOT/venv"
 cmake -S "$BS" -B "$BS/build-us" -GNinja -DCMAKE_BUILD_TYPE=Release -DSSB64_VERSION=us -DSSB64_BASEROM="$ROM" -DPython3_EXECUTABLE="$VENV/bin/python"
 cmake --build "$BS/build-us"
 ls -la "$BS/build-us/BattleShip" "$BS/build-us/BattleShip.o2r"
+mkdir -p "$HOME/.smash-online" && gcc -shared -fPIC -o "$HOME/.smash-online/fps-probe.so" "$(dirname "$0")/fps-probe.c" -ldl   # real swap rate -> /tmp/fps.log
 echo BUILD-DONE

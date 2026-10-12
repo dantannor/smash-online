@@ -333,3 +333,9 @@ document.querySelector('#fighters').addEventListener('click', () => { gridEl.hid
 document.querySelector('#finder-close').addEventListener('click', () => { gridEl.hidden = true; });
 gridSearch.addEventListener('input', renderGrid);
 gridSearch.addEventListener('keydown', event => { if (event.key === 'Escape') { gridEl.hidden = true; gridSearch.blur(); } });
+
+// Optional guest-side sharpening for a soft (low bitrate or upscaled) picture; remembered per browser.
+const sharpenButton = document.querySelector('#sharpen');
+function applySharpen(on) { video.classList.toggle('sharp', on); sharpenButton.setAttribute('aria-pressed', String(on)); try { localStorage.setItem('smash-sharpen', on ? '1' : '0'); } catch {} }
+sharpenButton.addEventListener('click', () => applySharpen(!video.classList.contains('sharp')));
+try { if (localStorage.getItem('smash-sharpen') === '1') applySharpen(true); } catch {}
