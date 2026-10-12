@@ -115,6 +115,7 @@ async function checkResume() {
   const now = Date.now();
   const gap = now - lastTickAt;
   lastTickAt = now;
+  if (gap > 4000) log(`slow tick: ${Math.round(gap / 100) / 10} s since the previous one`);
   if (gap < 20000) return false;
   log(`clock gap of ${Math.round(gap / 1000)} s: resumed from suspend`);
   startedAt = now; lastGuestAt = 0; sessionHappened = false; lastPublished = ""; lastRegistered = ""; registeredAt = 0;

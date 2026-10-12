@@ -14,7 +14,7 @@ const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 20
 const saJson = JSON.stringify({ client_email: "wake@test.iam.gserviceaccount.com", private_key: privateKey.export({ type: "pkcs8", format: "pem" }) });
 
 // Stub of the Compute API and the OAuth token endpoint.
-const gcp = { status: "TERMINATED", lastStart: new Date(0).toISOString(), starts: 0, resumes: 0, suspends: 0, tokens: 0, badJwt: 0 };
+const gcp = { suspendedAt: undefined, stops: 0, status: "TERMINATED", lastStart: new Date(0).toISOString(), starts: 0, resumes: 0, suspends: 0, tokens: 0, badJwt: 0 };
 let stub, dev;
 test.before(async () => {
   stub = createServer((req, res) => {
@@ -31,17 +31,18 @@ test.before(async () => {
     }
     if (req.headers.authorization !== "Bearer tok") { res.writeHead(401).end("{}"); return; }
     const base = "/compute/v1/projects/proj/zones/zone/instances/vm";
-    if (req.method === "GET" && url.pathname === base) { res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ status: gcp.status, lastStartTimestamp: gcp.lastStart })); return; }
+    if (req.method === "GET" && url.pathname === base) { res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ status: gcp.status, lastStartTimestamp: gcp.lastStart, lastSuspendedTimestamp: gcp.suspendedAt })); return; }
     if (req.method === "POST" && url.pathname === `${base}/start`) { gcp.starts++; gcp.status = "RUNNING"; gcp.lastStart = new Date().toISOString(); res.writeHead(200, { "content-type": "application/json" }).end("{}"); return; }
     if (req.method === "POST" && url.pathname === `${base}/resume`) { gcp.resumes++; gcp.status = "RUNNING"; gcp.lastStart = new Date().toISOString(); res.writeHead(200, { "content-type": "application/json" }).end("{}"); return; }
     if (req.method === "POST" && url.pathname === `${base}/suspend`) { gcp.suspends++; gcp.status = "SUSPENDED"; res.writeHead(200, { "content-type": "application/json" }).end("{}"); return; }
+    if (req.method === "POST" && url.pathname === `${base}/stop`) { gcp.stops++; gcp.status = "TERMINATED"; res.writeHead(200, { "content-type": "application/json" }).end("{}"); return; }
     res.writeHead(404).end("{}");
   });
   await new Promise((resolve) => stub.listen(0, "127.0.0.1", resolve));
   const stubOrigin = `http://127.0.0.1:${stub.address().port}`;
   execFileSync("node", [join(here, "build-assets.mjs")]);
   const vars = { P1_SECRET: P1, FRIEND_SECRET: FRIEND, VM_SECRET: VM, GCP_SA_JSON: saJson, GCP_API_BASE: stubOrigin, GCP_TOKEN_URL: `${stubOrigin}/token`, GCP_PROJECT: "proj", GCP_ZONE: "zone", GCP_INSTANCE: "vm" };
-  const args = ["wrangler", "dev", "--local", "--port", String(PORT), "--persist-to", join(here, ".wrangler", `wake-${PORT}`), ...Object.entries(vars).flatMap(([k, v]) => ["--var", `${k}:${v}`])];
+  const args = ["wrangler", "dev", "--local", "--test-scheduled", "--port", String(PORT), "--persist-to", join(here, ".wrangler", `wake-${PORT}`), ...Object.entries(vars).flatMap(([k, v]) => ["--var", `${k}:${v}`])];
   dev = spawn("npx", args, { cwd: here, stdio: ["ignore", "pipe", "pipe"], detached: true });
   const deadline = Date.now() + 90_000;
   for (;;) {
@@ -144,4 +145,19 @@ test("a suspended VM is resumed (not started) by the P1 link only, and idle susp
   assert.equal(gcp.suspends, 1);
   assert.equal((await status(`/go/${P1}/status`)).state, "down", "registration cleared and VM suspended");
   assert.equal((await suspend(VM)).status, 409, "only a running VM can be suspended");
+});
+
+test("wake history is recorded, and the cron stops only VMs suspended for a long time", async () => {
+  const wakes = async () => (await (await fetch(`${origin}/api/vm/wakes`, { headers: { authorization: `Bearer ${VM}` } })).json()).wakes;
+  assert.equal((await fetch(`${origin}/api/vm/wakes`)).status, 403);
+  const log = await wakes();
+  assert.ok(log.some((w) => w.action === "resume" && Number.isFinite(w.apiMs)) && log.some((w) => w.action === "start"));
+  const cron = () => fetch(`${origin}/cdn-cgi/handler/scheduled`);
+  gcp.status = "SUSPENDED"; gcp.suspendedAt = new Date(Date.now() - 5 * 60_000).toISOString();
+  await cron(); assert.equal(gcp.stops, 0, "recent suspend is left alone");
+  gcp.suspendedAt = new Date(Date.now() - 2 * 3600_000).toISOString();
+  await cron(); assert.equal(gcp.stops, 1, "long suspend becomes a power-off");
+  assert.equal(gcp.status, "TERMINATED");
+  await cron(); assert.equal(gcp.stops, 1, "nothing to do for a stopped VM");
+  assert.ok((await wakes()).some((w) => w.action === "sweep-stop"));
 });

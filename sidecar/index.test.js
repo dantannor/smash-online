@@ -239,3 +239,17 @@ test("roster:page writes a new '<seq> <page>' request for the game and validates
   bare.requestRosterPage(1, host);
   assert.ok(host.messages.some((m) => m.code === "roster_unavailable"));
 });
+
+test("roster:pick writes '<seq> <player> <idx>' for a custom fighter or an original and validates input", (t) => {
+  const { file } = fixture(t);
+  const pickFile = file + ".pick";
+  const sidecar = new Sidecar({ file, rosterPickFile: pickFile }).start();
+  t.after(() => sidecar.close());
+  const host = client();
+  sidecar.requestRosterPick(3, 500, host);
+  assert.deepEqual(fs.readFileSync(pickFile, "utf8").trim().split(" ").slice(1), ["2", "500"]);
+  sidecar.requestRosterPick(1, -5, host);
+  assert.deepEqual(fs.readFileSync(pickFile, "utf8").trim().split(" ").slice(1), ["0", "-5"]);
+  sidecar.requestRosterPick(9, 1, host); sidecar.requestRosterPick(1, 5000, host); sidecar.requestRosterPick(1, 1.5, host);
+  assert.equal(host.messages.filter((m) => m.code === "invalid_pick").length, 3);
+});

@@ -16,6 +16,9 @@ class_name = "Room"
 name = "REGISTRY"
 class_name = "Registry"
 
+[triggers]
+crons = ["*/10 * * * *"]
+
 [vars]
 GCP_PROJECT = "smash-online-511318"
 GCP_ZONE = "me-west1-c"

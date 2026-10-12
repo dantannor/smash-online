@@ -33,7 +33,14 @@ export function createApplication({ now = Date.now } = {}) {
     if (req.method === "GET" && url.pathname === "/healthz") return json(res, 200, { status: "ok" });
     if (req.method === "GET" && url.pathname === "/roster.json") { // the cloud host page forwards this list to guests for the fighter finder
       let custom = [];
-      try { custom = JSON.parse(readFileSync(process.env.SMASH_ROSTER_JSON || "", "utf8")).characters.map((c) => ({ name: c.name, base: c.base, page: c.page })); } catch { /* no staged roster: originals only */ }
+      try {
+        const file = process.env.SMASH_ROSTER_JSON || "";
+        const staged = JSON.parse(readFileSync(file, "utf8")).characters;
+        let portraits = new Map();
+        try { portraits = new Map(JSON.parse(readFileSync(resolve(file, "..", "catalog.json"), "utf8")).characters.map((c) => [c.slug, c.portraitMedium || c.portrait || ""])); } catch { /* no catalog copy: names only */ }
+        // portrait: the 64-hex object hash of smash.fun's public fighter asset (guests rebuild the URL), or a full URL if it has another shape
+        custom = staged.map((c) => { const url = portraits.get(c.slug) || ""; const m = url.match(/^https:\/\/storage\.googleapis\.com\/smash-the-weights-fighter-assets\/baked\/v1\/objects\/([a-f0-9]{64})\/portrait_medium\.png$/); return { name: c.name, base: c.base, page: c.page, portrait: m ? m[1] : url }; });
+      } catch { /* no staged roster: originals only */ }
       return json(res, 200, { originals: ORIGINALS, custom });
     }
     if (req.method === "GET" && url.pathname === "/api/ice") return json(res, 200, { iceServers: STUN.map((urls) => ({ urls })) });

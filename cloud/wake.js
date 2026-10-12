@@ -46,6 +46,18 @@ export const startInstance = (env) => gcp(env, "/start", { method: "POST" });
 export const resumeInstance = (env) => gcp(env, "/resume", { method: "POST" });
 export const suspendInstance = (env) => gcp(env, "/suspend", { method: "POST" });
 
+// Cron: a VM that has been suspended for a long time is slow to resume (observed 78 s click to registration after 6 h, against
+// 22 s after 33 min), so past SLEEP_STOP_MIN minutes turn the suspend into a power-off: a cold start is a steady ~30 s.
+export async function sweepSleepers(env) {
+  const instance = await getInstance(env);
+  if (instance.status !== "SUSPENDED") return "not suspended";
+  const since = Date.parse(instance.lastSuspendedTimestamp || "") || Date.now();
+  if (Date.now() - since < Number(env.SLEEP_STOP_MIN || 45) * 60_000) return "recently suspended";
+  await gcp(env, "/stop", { method: "POST" });
+  await registry(env).logWake({ action: "sweep-stop", suspendedAt: instance.lastSuspendedTimestamp });
+  return "stopped";
+}
+
 // ---- state -----------------------------------------------------------------------------------------------
 const registry = (env) => env.REGISTRY.get(env.REGISTRY.idFromName("vm"));
 const STOPPED = new Set(["TERMINATED", "STOPPED"]);
@@ -61,7 +73,11 @@ export async function vmState(env, { wake = false } = {}) {
   if (asleep) {
     if (!wake) return { state: "down" };
     await registry(env).clear();           // never hand out a previous run's room
-    if (instance.status === "SUSPENDED") await resumeInstance(env); else await startInstance(env);
+    const action = instance.status === "SUSPENDED" ? "resume" : "start";
+    const t0 = Date.now();
+    try { await (action === "resume" ? resumeInstance(env) : startInstance(env)); }
+    catch (error) { await registry(env).logWake({ action, from: instance.status, error: error.message }); throw error; }
+    await registry(env).logWake({ action, from: instance.status, apiMs: Date.now() - t0, suspendedAt: instance.lastSuspendedTimestamp || null });
     return { state: "starting" };
   }
   if (instance.status === "STOPPING" || instance.status === "SUSPENDING") return { state: "stopping" };
@@ -78,6 +94,8 @@ const STYLE = `<style>:root{color-scheme:dark;font:17px system-ui,sans-serif;bac
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 const pollScript = (statusUrl) => `<script>
 const started = Date.now(), el = document.getElementById("msg");
+// remembered so a guest page that finds its room dead can come back here for the current one
+try { sessionStorage.setItem("smash-entry", location.pathname); } catch {}
 async function tick() {
   try {
     const s = await (await fetch(${JSON.stringify(statusUrl)}, { cache: "no-store" })).json();
@@ -96,6 +114,11 @@ function waitPage({ title, message, statusUrl, extra = "" }) {
 // ---- routes ----------------------------------------------------------------------------------------------
 export async function handleWake(request, env, url) {
   const origin = url.origin;
+  if (url.pathname === "/api/vm/wakes") {
+    const bearer = (request.headers.get("authorization") || "").replace(/^Bearer /, "");
+    if (!(await sameSecret(bearer, env.VM_SECRET))) return json(403, { error: "forbidden" });
+    return json(200, { wakes: await registry(env).wakes() });
+  }
   if (url.pathname === "/api/vm/register" || url.pathname === "/api/vm/clear" || url.pathname === "/api/vm/suspend") {
     if (request.method !== "POST") return json(405, { error: "method" });
     const bearer = (request.headers.get("authorization") || "").replace(/^Bearer /, "");

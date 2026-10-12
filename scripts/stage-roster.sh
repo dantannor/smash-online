@@ -18,6 +18,7 @@ rows = json.load(open(sys.argv[1]))["characters"]
 print(",".join(r["slug"] for r in (rows if sys.argv[2] == "all" else rows[:int(sys.argv[2])])))
 PY
 )}"
+cp "$catalog" "$OUT/catalog.json"   # kept so the cloud host can show smash.fun portrait URLs in the fighter grid
 echo "Catalog has $(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["characters"]))' "$catalog") fighters; staging: $slugs"
 python3 "$OPENSMASH/targets/characters.py" --target native --output "$OUT" --site "$SITE" --catalog "$catalog" --characters "$slugs"
 echo "Roster ready: $OUT/roster.txt"

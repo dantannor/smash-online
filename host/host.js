@@ -29,12 +29,16 @@ async function sendRoster(channel) {
   const { originals, custom } = await loadRoster();
   const send = value => { if (channel.readyState === "open") channel.send(JSON.stringify(value)); };
   send({ type: "roster:begin", originals, total: custom.length, pages: 1 + Math.ceil(custom.length / 12), page: lastRosterPage });
-  for (let i = 0; i < custom.length; i += 100) send({ type: "roster:chunk", offset: i, items: custom.slice(i, i + 100).map(c => [c.name, c.base]) });
+  for (let i = 0; i < custom.length; i += 60) send({ type: "roster:chunk", offset: i, items: custom.slice(i, i + 60).map(c => [c.name, c.base, c.portrait || ""]) });
   send({ type: "roster:end" });
 }
 function handleMeta(port, raw) {
   let message;
   try { message = JSON.parse(raw); } catch { return; }
+  if (message?.type === "roster:pick" && Number.isInteger(message.idx) && message.idx >= -12 && message.idx < 4096) {
+    sendSidecar({ type: "roster:pick", port, idx: message.idx });
+    return;
+  }
   if (message?.type === "roster:page" && Number.isInteger(message.page) && message.page >= 0 && message.page < 4096) {
     lastRosterPage = message.page;
     sendSidecar({ type: "roster:page", page: message.page });
