@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const PORT = 8900 + Math.floor(Math.random() * 90);
 const origin = `http://127.0.0.1:${PORT}`;
-const P1 = "p1_secret_for_tests", FRIEND = "friend_secret_for_tests", VM = "vm_secret_for_tests";
+const INVITE = "invite_secret_for_tests", P1 = "p1_secret_for_tests", FRIEND = "friend_secret_for_tests", VM = "vm_secret_for_tests";
 const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const saJson = JSON.stringify({ client_email: "wake@test.iam.gserviceaccount.com", private_key: privateKey.export({ type: "pkcs8", format: "pem" }) });
 
@@ -41,7 +41,7 @@ test.before(async () => {
   await new Promise((resolve) => stub.listen(0, "127.0.0.1", resolve));
   const stubOrigin = `http://127.0.0.1:${stub.address().port}`;
   execFileSync("node", [join(here, "build-assets.mjs")]);
-  const vars = { P1_SECRET: P1, FRIEND_SECRET: FRIEND, VM_SECRET: VM, GCP_SA_JSON: saJson, GCP_API_BASE: stubOrigin, GCP_TOKEN_URL: `${stubOrigin}/token`, GCP_PROJECT: "proj", GCP_ZONE: "zone", GCP_INSTANCE: "vm" };
+  const vars = { INVITE_SECRET: INVITE, P1_SECRET: P1, FRIEND_SECRET: FRIEND, VM_SECRET: VM, GCP_SA_JSON: saJson, GCP_API_BASE: stubOrigin, GCP_TOKEN_URL: `${stubOrigin}/token`, GCP_PROJECT: "proj", GCP_ZONE: "zone", GCP_INSTANCE: "vm" };
   const args = ["wrangler", "dev", "--local", "--test-scheduled", "--port", String(PORT), "--persist-to", join(here, ".wrangler", `wake-${PORT}`), ...Object.entries(vars).flatMap(([k, v]) => ["--var", `${k}:${v}`])];
   dev = spawn("npx", args, { cwd: here, stdio: ["ignore", "pipe", "pipe"], detached: true });
   const deadline = Date.now() + 90_000;
@@ -75,7 +75,7 @@ test("markdown-escaped underscores work in permanent links without waking the VM
   assert.match(await goPage.text(), /Starting server/);
   const friendPage = await get(`/p/${escapedFriend}/2`);
   assert.equal(friendPage.status, 200);
-  assert.match(await friendPage.text(), /Waiting for the host/);
+  assert.match(await friendPage.text(), /Starting server/);
   assert.equal(gcp.starts, 0, "opening either link does not start the VM");
 });
 
@@ -84,13 +84,15 @@ test("pages show the starting / waiting state and the permanent friend links", a
   assert.match(page, /Starting server/);
   assert.ok(page.includes(`${origin}/p/${FRIEND}/2`) && page.includes(`${origin}/p/${FRIEND}/4`));
   const friendPage = await (await get(`/p/${FRIEND}/3`)).text();
-  assert.match(friendPage, /Waiting for the host/);
+  assert.match(friendPage, /Starting server/);
+  assert.ok(page.includes(`${origin}/join/${INVITE}`), "the loading page shows the invite link");
   assert.equal(gcp.starts, 0, "viewing pages and friend links never starts the VM");
 });
 
-test("friend links and plain status polling do not wake the VM; the P1 poll with wake=1 does, once", async () => {
+test("plain status reads never wake the VM; a poll with wake=1 from the P1 link does, once", async () => {
   assert.equal((await status(`/p/${FRIEND}/2/status`)).state, "down");
   assert.equal((await status(`/go/${P1}/status`)).state, "down");
+  assert.equal((await status(`/join/${INVITE}/status?c=x`)).state, "down");
   assert.equal(gcp.starts, 0);
   assert.equal((await status(`/go/${P1}/status?wake=1`)).state, "starting");
   assert.equal(gcp.starts, 1);
@@ -160,4 +162,27 @@ test("wake history is recorded, and the cron stops only VMs suspended for a long
   assert.equal(gcp.status, "TERMINATED");
   await cron(); assert.equal(gcp.stops, 1, "nothing to do for a stopped VM");
   assert.ok((await wakes()).some((w) => w.action === "sweep-stop"));
+});
+
+test("every link wakes the VM; the invite link hands out P1..P4 in order, remembers a returning browser, and says full", async () => {
+  // friend link wakes a stopped VM
+  gcp.status = "TERMINATED"; const starts = gcp.starts;
+  assert.equal((await status(`/p/${FRIEND}/3/status?wake=1`)).state, "starting");
+  assert.equal(gcp.starts, starts + 1);
+  // invite link wakes a suspended one
+  gcp.status = "SUSPENDED"; const resumes = gcp.resumes;
+  assert.equal((await status(`/join/${INVITE}/status?wake=1&c=aaa`)).state, "starting");
+  assert.equal(gcp.resumes, resumes + 1);
+  await register(reg());
+  const open = async (c) => status(`/join/${INVITE}/status?wake=1&c=${c}`);
+  const first = await open("aaa"), second = await open("bbb"), third = await open("ccc");
+  assert.deepEqual([first.port, second.port, third.port], [1, 2, 3]);
+  assert.match(first.url, /slot=tok1$/); assert.match(second.url, /slot=tok2$/);
+  assert.equal((await open("bbb")).port, 2, "a reload keeps the slot");
+  assert.equal((await open("ddd")).port, 4);
+  const fifth = await open("eee");
+  assert.equal(fifth.state, "full"); assert.match(fifth.message, /full/);
+  assert.equal((await open("aaa")).port, 1, "returning player still has their slot while the room is full");
+  // a permanent link takes its own port regardless
+  assert.equal((await status(`/go/${P1}/status`)).state, "ready");
 });

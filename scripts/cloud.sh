@@ -4,7 +4,7 @@
 #   scripts/cloud.sh down     suspend the VM (memory and disk are kept; `down --stop` powers it off instead)
 #   scripts/cloud.sh status   VM state, services, guests, idle-shutdown settings
 #   scripts/cloud.sh links    print the permanent P1 and friend URLs (links --live: the current room's links)
-#   scripts/cloud.sh secrets <gcp-key.json>   generate the permanent-link secrets and store them as Worker secrets
+#   scripts/cloud.sh secrets [gcp-key.json]   generate the permanent-link secrets and store them as Worker secrets
 #   scripts/cloud.sh sync     copy this checkout to the VM and restart the services
 #   scripts/cloud.sh newroom  restart the host page (new room, new links)
 #   scripts/cloud.sh idle <bootGraceMin> <idleMin>   change the idle-shutdown timeouts
@@ -159,24 +159,26 @@ cmd_down() {
   else say "suspended (memory and disk kept; resumes in about 12 s)"; fi
 }
 cmd_secrets() {
-  local key="${1:-}"; [[ -f "$key" ]] || { echo "usage: cloud.sh secrets <gcp-service-account-key.json>" >&2; exit 64; }
+  local key="${1:-}"
+  [[ -z "$key" || -f "$key" ]] || { echo "usage: cloud.sh secrets [gcp-service-account-key.json]" >&2; exit 64; }
+  local g; g() { node -e 'console.log(require("crypto").randomBytes(32).toString("base64url"))'; }
   if [[ ! -f "$PERM" ]]; then
-    local g; g() { node -e 'console.log(require("crypto").randomBytes(32).toString("base64url"))'; }
     ( umask 077; printf 'P1_SECRET=%s\nFRIEND_SECRET=%s\nVM_SECRET=%s\n' "$(g)" "$(g)" "$(g)" > "$PERM" )
     say "generated $PERM"
   fi
+  grep -q '^INVITE_SECRET=' "$PERM" || { ( umask 077; printf 'INVITE_SECRET=%s\n' "$(g)" >> "$PERM" ); say "added INVITE_SECRET"; }
   ( . "$PERM"
     cd "$ROOT"
-    for name in P1_SECRET FRIEND_SECRET VM_SECRET; do printf '%s' "${!name}" | npx wrangler secret put "$name" --config cloud/wrangler.toml >/dev/null; done
-    npx wrangler secret put GCP_SA_JSON --config cloud/wrangler.toml < "$key" >/dev/null )
-  say "Worker secrets stored (P1_SECRET, FRIEND_SECRET, VM_SECRET, GCP_SA_JSON)"
-  [[ "$(vm_status)" == RUNNING ]] && { write_ssh_config "$(vm_ip)"; push_vm_secret; }
-  true
+    for name in P1_SECRET FRIEND_SECRET VM_SECRET INVITE_SECRET; do printf '%s' "${!name}" | npx wrangler secret put "$name" --config cloud/wrangler.toml >/dev/null; done
+    [[ -z "$key" ]] || npx wrangler secret put GCP_SA_JSON --config cloud/wrangler.toml < "$key" >/dev/null )
+  say "Worker secrets stored"
 }
 cmd_links() {
   if [[ "${1:-}" != --live ]]; then
     [[ -r "$PERM" ]] || { echo "no permanent links yet: run scripts/cloud.sh secrets <gcp-key.json>" >&2; exit 1; }
-    ( . "$PERM"; echo "P1 (Daniel, wakes the VM): $WORKER_ORIGIN/go/$P1_SECRET"; for n in 2 3 4; do echo "P$n (friends, never wake the VM): $WORKER_ORIGIN/p/$FRIEND_SECRET/$n"; done )
+    ( . "$PERM"
+      [[ -z "${INVITE_SECRET:-}" ]] || echo "INVITE (anyone: wakes the VM, first opener is P1, then P2..P4): $WORKER_ORIGIN/join/$INVITE_SECRET"
+      echo "P1 (Daniel, wakes the VM): $WORKER_ORIGIN/go/$P1_SECRET"; for n in 2 3 4; do echo "P$n (fixed friend slot, also wakes the VM): $WORKER_ORIGIN/p/$FRIEND_SECRET/$n"; done )
     return
   fi
   local j; j="$(status_json)"; [[ -n "$j" ]] || { echo "no links (is the VM up? scripts/cloud.sh up)" >&2; exit 1; }; echo "$j" | print_links; }

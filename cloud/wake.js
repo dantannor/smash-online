@@ -90,16 +90,19 @@ export async function vmState(env, { wake = false } = {}) {
 const playUrl = (origin, room, token) => `${origin}/play?room=${encodeURIComponent(room)}&slot=${encodeURIComponent(token)}`;
 
 // ---- pages -----------------------------------------------------------------------------------------------
-const STYLE = `<style>:root{color-scheme:dark;font:17px system-ui,sans-serif;background:#10151d;color:#edf2f7}body{max-width:34rem;margin:12vh auto;padding:0 1.2rem}h1{font-size:1.5rem}.muted{color:#a8b3c2}input{width:100%;margin:.2rem 0 .8rem;padding:.5rem;border-radius:.4rem;border:1px solid #334;background:#1b2430;color:inherit;font:inherit}.bar{height:.4rem;background:#1b2430;border-radius:.2rem;overflow:hidden}.bar i{display:block;height:100%;width:40%;background:#42e8a4;animation:s 1.4s ease-in-out infinite alternate}@keyframes s{from{margin-left:0}to{margin-left:60%}}</style>`;
+const STYLE = `<style>:root{color-scheme:dark;font:17px system-ui,sans-serif;background:#10151d;color:#edf2f7}body{max-width:34rem;margin:12vh auto;padding:0 1.2rem}h1{font-size:1.5rem}.muted{color:#a8b3c2}button{padding:.5rem 1rem;border:0;border-radius:.4rem;background:#5b5be8;color:#fff;font:inherit;font-weight:700;cursor:pointer}input{width:100%;margin:.2rem 0 .8rem;padding:.5rem;border-radius:.4rem;border:1px solid #334;background:#1b2430;color:inherit;font:inherit}.bar{height:.4rem;background:#1b2430;border-radius:.2rem;overflow:hidden}.bar i{display:block;height:100%;width:40%;background:#42e8a4;animation:s 1.4s ease-in-out infinite alternate}@keyframes s{from{margin-left:0}to{margin-left:60%}}</style>`;
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 const pollScript = (statusUrl) => `<script>
 const started = Date.now(), el = document.getElementById("msg");
+// a returning browser keeps its slot on the invite link
+let client = ""; try { client = localStorage.getItem("smash-client") || ""; if (!client) { client = Array.from(crypto.getRandomValues(new Uint8Array(12)), b => b.toString(16).padStart(2, "0")).join(""); localStorage.setItem("smash-client", client); } } catch { client = "tmp" + Math.random().toString(36).slice(2); }
 // remembered so a guest page that finds its room dead can come back here for the current one
 try { sessionStorage.setItem("smash-entry", location.pathname); } catch {}
 async function tick() {
   try {
-    const s = await (await fetch(${JSON.stringify(statusUrl)}, { cache: "no-store" })).json();
+    const s = await (await fetch(${JSON.stringify(statusUrl)} + "&c=" + client, { cache: "no-store" })).json();
     if (s.url) { location.replace(s.url); return; }
+    if (s.state === "full") { el.textContent = s.message; document.querySelector(".bar").hidden = true; return; }
     const secs = Math.round((Date.now() - started) / 1000);
     el.textContent = s.message + " (" + secs + " s)";
   } catch { el.textContent = "Connection hiccup, retrying…"; }
@@ -138,18 +141,33 @@ export async function handleWake(request, env, url) {
     return json(200, { ok: true });
   }
 
+  const msgFor = (state) => state === "error" ? "Could not reach the cloud API, retrying…" : state === "stopping" ? "The server is shutting down, it will start again in a moment" : "Starting server, about 30 seconds";
+  // Every link wakes the VM (the status poll with wake=1); plain status reads never do. A permanent P1/friend link names its port,
+  // the invite link takes the lowest free one. `claim` records who holds which port so the next opener gets the next port.
+  async function resolve({ wake, port, client }) {
+    const s = await vmState(env, { wake }).catch((e) => ({ state: "error", error: e.message }));
+    if (s.state !== "ready") return { state: s.state, message: msgFor(s.state) };
+    let chosen = port;
+    if (!port) {
+      let connected = [];
+      try { connected = await env.ROOM.get(env.ROOM.idFromName(s.room)).connected(); } catch { /* treat as none connected */ }
+      chosen = await registry(env).claim({ room: s.room, client: client || "anonymous", connected });
+      if (chosen === null) return { state: "full", message: "This game is full (4 of 4 players). Ask someone to leave, or try again in a minute." };
+    } else await registry(env).claim({ room: s.room, client: `fixed-${port}`, port, connected: [] });
+    if (!s.slots[chosen]) return { state: "starting", message: msgFor("starting") };
+    return { state: "ready", port: chosen, url: playUrl(origin, s.room, s.slots[chosen]) };
+  }
+  const clientOf = (u) => (u.searchParams.get("c") || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64);
+  const inviteBox = () => env.INVITE_SECRET ? `<h2>Invite link</h2><p class="muted">Share this with the other players. Whoever opens it next becomes the next player.</p><input id="invite" readonly value="${esc(`${origin}/join/${env.INVITE_SECRET}`)}" onclick="this.select()"><button id="copy" type="button" onclick="navigator.clipboard.writeText(document.getElementById('invite').value).then(()=>{this.textContent='Copied'}).catch(()=>{document.getElementById('invite').select();document.execCommand('copy');this.textContent='Copied'})">Copy link</button>` : "";
+
   const p1 = url.pathname.match(/^\/go\/([^/]+)(\/status)?$/);
   if (p1) {
     const secret = pathSecret(p1[1]);
     if (!secret || !(await sameSecret(secret, env.P1_SECRET))) return html("Not found", 404);
-    const base = `/go/${secret}`;
-    if (p1[2]) {
-      const s = await vmState(env, { wake: url.searchParams.get("wake") === "1" }).catch((e) => ({ state: "error", error: e.message }));
-      if (s.state === "ready" && s.slots[1]) return json(200, { state: "ready", url: playUrl(origin, s.room, s.slots[1]) });
-      return json(200, { state: s.state, message: s.state === "error" ? "Could not reach the cloud API, retrying…" : s.state === "stopping" ? "The server is shutting down, it will start again in a moment" : "Starting server, about 60 seconds" });
-    }
-    const friends = [2, 3, 4].map((port) => `<label class="muted">P${port} (friends, they do not wake the server)</label><input readonly value="${esc(`${origin}/p/${env.FRIEND_SECRET}/${port}`)}" onclick="this.select()">`).join("");
-    return waitPage({ title: "Starting the Smash server", message: "Starting server, about 60 seconds", statusUrl: `${base}/status?wake=1`, extra: `<h2>Friend links</h2>${friends}` });
+    if (p1[2]) return json(200, await resolve({ wake: url.searchParams.get("wake") === "1", port: 1 }));
+    const now = await resolve({ wake: false, port: 1 });
+    if (now.url) return new Response(null, { status: 302, headers: { location: now.url, "cache-control": "no-store" } });
+    return waitPage({ title: "Starting the Smash server", message: msgFor("starting"), statusUrl: `/go/${secret}/status?wake=1`, extra: inviteBox() + `<h2>Friend links</h2>` + [2, 3, 4].map((port) => `<label class="muted">P${port}</label><input readonly value="${esc(`${origin}/p/${env.FRIEND_SECRET}/${port}`)}" onclick="this.select()">`).join("") });
   }
 
   const friend = url.pathname.match(/^\/p\/([^/]+)\/([2-4])(\/status)?$/);
@@ -157,11 +175,18 @@ export async function handleWake(request, env, url) {
     const secret = pathSecret(friend[1]);
     if (!secret || !(await sameSecret(secret, env.FRIEND_SECRET))) return html("Not found", 404);
     const port = Number(friend[2]);
-    const s = await vmState(env).catch(() => ({ state: "error" }));
-    const ready = s.state === "ready" && s.slots[port];
-    if (friend[3]) return json(200, ready ? { state: "ready", url: playUrl(origin, s.room, s.slots[port]) } : { state: s.state, message: "Waiting for the host to start the game" });
-    if (ready) return new Response(null, { status: 302, headers: { location: playUrl(origin, s.room, s.slots[port]), "cache-control": "no-store" } });
-    return waitPage({ title: `Smash Online, player ${port}`, message: "Waiting for the host to start the game", statusUrl: `/p/${secret}/${port}/status` });
+    if (friend[3]) return json(200, await resolve({ wake: url.searchParams.get("wake") === "1", port }));
+    const now = await resolve({ wake: false, port });                     // already up: skip the waiting page
+    if (now.url) return new Response(null, { status: 302, headers: { location: now.url, "cache-control": "no-store" } });
+    return waitPage({ title: `Smash Online, player ${port}`, message: msgFor("starting"), statusUrl: `/p/${secret}/${port}/status?wake=1`, extra: inviteBox() });
+  }
+
+  const invite = url.pathname.match(/^\/join\/([^/]+)(\/status)?$/);
+  if (invite) {
+    const secret = pathSecret(invite[1]);
+    if (!env.INVITE_SECRET || !secret || !(await sameSecret(secret, env.INVITE_SECRET))) return html("Not found", 404);
+    if (invite[2]) return json(200, await resolve({ wake: url.searchParams.get("wake") === "1", client: clientOf(url) }));
+    return waitPage({ title: "Joining the Smash game", message: msgFor("starting"), statusUrl: `/join/${secret}/status?wake=1`, extra: inviteBox() });
   }
   return null;
 }

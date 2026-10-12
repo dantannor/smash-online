@@ -66,6 +66,9 @@ export class Room extends DurableObject {
     return new Response(null, { status: 101, webSocket: client });
   }
 
+  // ports that currently have a live guest socket (the invite link uses this to decide which slots are free)
+  connected() { return PORTS.filter((port) => this.slotSocket(port)); }
+
   slotSocket(port) {
     for (const ws of this.ctx.getWebSockets(`slot:${port}`)) {
       if (ws.readyState !== WebSocket.OPEN) continue;
