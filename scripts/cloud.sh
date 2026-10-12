@@ -61,10 +61,11 @@ Host smash-vm
   ConnectTimeout 20
 C
 }
+tmo() { local secs="$1"; shift; perl -e 'alarm shift; exec @ARGV' "$secs" "$@"; }   # no coreutils timeout on macOS
 vssh() { ssh -F "$SSH_CONF" smash-vm "$@"; }
 wait_ssh() {
   local end=$((SECONDS + 240))
-  until vssh true >/dev/null 2>&1; do ((SECONDS < end)) || { echo "SSH over TLS never came up" >&2; return 1; }; sleep 4; done
+  until tmo 25 ssh -F "$SSH_CONF" smash-vm true >/dev/null 2>&1; do ((SECONDS < end)) || { echo "SSH over TLS never came up" >&2; return 1; }; sleep 4; done
 }
 create_vm() {
   ensure_key
@@ -78,7 +79,7 @@ create_vm() {
 sync_repo() {
   say "copying the checkout to the VM"
   (cd "$ROOT" && { git ls-files; git ls-files --others --exclude-standard; } | sort -u | grep -v '^harness/reports/' \
-    | COPYFILE_DISABLE=1 tar --no-xattrs -czf - -T - 2>/dev/null) | vssh 'mkdir -p ~/smash-online && tar -xzf - -C ~/smash-online && cd ~/smash-online && (test -d node_modules/ws || npm install --no-save --no-package-lock --ignore-scripts ws@8.22.0 2>&1 | tail -1)'
+    | COPYFILE_DISABLE=1 tar --no-xattrs -czf - -T - 2>/dev/null) | vssh 'mkdir -p ~/smash-online && tar -xzf - -C ~/smash-online && cd ~/smash-online && (! command -v npm >/dev/null || test -d node_modules/ws || npm install --no-save --no-package-lock --ignore-scripts ws@8.22.0 2>&1 | tail -1)'
 }
 provision() { # first run: dependencies, ROM, game build, roster, services (takes ~20 min)
   [[ -f "$ROM" ]] || { echo "ROM not found: $ROM (set SMASH_ROM_PATH)" >&2; exit 2; }
@@ -87,7 +88,7 @@ provision() { # first run: dependencies, ROM, game build, roster, services (take
   sync_repo
   say "uploading the ROM to the VM (it goes nowhere else)"
   scp -F "$SSH_CONF" "$ROM" smash-vm:rom.z64 && vssh 'chmod 600 ~/rom.z64'
-  vssh 'cd ~/smash-online/cloud/vm && sudo ./install-deps.sh > ~/provision.log 2>&1 && ./build-game.sh >> ~/provision.log 2>&1 && cd ~/smash-online && ./scripts/stage-roster.sh >> ~/provision.log 2>&1 && echo PROVISION-OK >> ~/provision.log' \
+  vssh 'cd ~/smash-online/cloud/vm && sudo ./install-deps.sh > ~/provision.log 2>&1 && ./build-game.sh >> ~/provision.log 2>&1 && cd ~/smash-online && (test -d node_modules/ws || npm install --no-save --no-package-lock --ignore-scripts ws@8.22.0 >> ~/provision.log 2>&1) && ./scripts/stage-roster.sh >> ~/provision.log 2>&1 && echo PROVISION-OK >> ~/provision.log' \
     || { echo "provisioning failed; see ~/provision.log on the VM (scripts/cloud.sh ssh tail -50 provision.log)" >&2; exit 1; }
   vssh 'sudo ~/smash-online/cloud/vm/install-services.sh'
 }

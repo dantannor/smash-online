@@ -91,6 +91,7 @@ async function publish(value) {
 // --- main loop -------------------------------------------------------------------------------------------
 mkdirSync(STATE_DIR, { recursive: true });
 const myBoot = bootId();
+const startedAt = Date.now(); // the grace period counts from when the services start, so a long first-run build does not eat it
 let lastPublished = "", sessionHappened = false, lastGuestAt = 0, clickAt = 0, lastRoom = null;
 
 async function tick() {
@@ -114,7 +115,7 @@ async function tick() {
   // Idle shutdown: before any session, a boot grace period; after one, idleMin without any guest.
   const idleFor = (now - lastGuestAt) / 60000;
   if (connected === 0) {
-    const expired = sessionHappened ? idleFor >= cfg.idleMin : uptimeSec() / 60 >= cfg.bootGraceMin;
+    const expired = sessionHappened ? idleFor >= cfg.idleMin : (now - startedAt) / 60000 >= cfg.bootGraceMin;
     if (expired) {
       log(`idle shutdown (${sessionHappened ? `no guest for ${idleFor.toFixed(1)} min` : "no guest since boot"}); poweroff=${cfg.poweroff}`);
       if (cfg.poweroff) execFile("sudo", ["-n", "systemctl", "poweroff"], () => {});
