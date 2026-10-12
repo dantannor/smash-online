@@ -18,7 +18,9 @@ const startButton = document.querySelector("#start");
 const resumeButton = document.querySelector("#resume");
 const sourceSelect = document.querySelector("#source");
 const peers = new Map();
-const statuses = new Map([2, 3, 4].map(port => [port, { status: "empty", ping: null }]));
+// ?p1guest=1 (headless/cloud host): P1 is a guest link like P2-P4 and "Play P1 here" starts off.
+const p1Guest = new URLSearchParams(location.search).get("p1guest") === "1";
+const statuses = new Map((p1Guest ? [1, 2, 3, 4] : [2, 3, 4]).map(port => [port, { status: "empty", ping: null }]));
 let roomInfo = null;
 let stream = null;
 let signaling = null;
@@ -136,7 +138,7 @@ function sendSignal(payload) {
 async function handleSignal(message) {
   if (message.type === "slot:connected") {
     const port = Number(message.port);
-    if (![2, 3, 4].includes(port) || !message.connectionId) return;
+    if (![1, 2, 3, 4].includes(port) || !message.connectionId) return;
     const existing = peers.get(port);
     if (existing?.connectionId === message.connectionId && !["failed", "closed", "disconnected"].includes(existing.pc.connectionState)) return;
     closePeer(port, false);
@@ -392,7 +394,7 @@ function stopCapture() {
 async function createRoom() {
   startButton.disabled = true;
   try {
-    roomInfo = { ...(await api("/api/rooms", { method: "POST", body: "{}" })), signal: signalOrigin };
+    roomInfo = { ...(await api("/api/rooms", { method: "POST", body: JSON.stringify(p1Guest ? { p1Guest: true } : {}) })), signal: signalOrigin };
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(roomInfo));
     renderLinks(roomInfo.slots);
     connectSidecar();
@@ -437,6 +439,7 @@ const p1Keys = new Set();
 let p1Connected = false;
 let lastP1Sent = 0;
 const p1Toggle = document.querySelector("#p1-toggle");
+if (p1Guest) p1Toggle.checked = false;
 const p1Live = document.querySelector("#p1-live");
 const GAME_CODES = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space", "Enter", "NumpadEnter"]);
 // Layout-independent: event.code is the physical key, so a Hebrew/other layout still maps WASD/JKL.

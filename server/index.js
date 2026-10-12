@@ -7,7 +7,8 @@ import { WebSocketServer, WebSocket } from "ws";
 
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const TTL_MS = 30 * 60 * 1000;
-const PORTS = [2, 3, 4];
+const PORTS = [1, 2, 3, 4]; // slot 1 only exists in rooms created with {p1Guest:true}
+const DEFAULT_PORTS = [2, 3, 4];
 const STUN = ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302"];
 const MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".ico": "image/x-icon", ".wasm": "application/wasm", ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf", ".otf": "font/otf", ".mp4": "video/mp4", ".webm": "video/webm", ".txt": "text/plain; charset=utf-8" };
 const ROM_EXT = new Set([".n64", ".z64", ".v64", ".o2r", ".otr"]);
@@ -37,16 +38,16 @@ export function createApplication({ now = Date.now } = {}) {
     }
     if (req.method === "POST" && url.pathname === "/api/rooms") {
       sweep();
+      const body = await readJson(req).catch(() => ({}));
+      const ports = body?.p1Guest === true ? PORTS : DEFAULT_PORTS;
       const id = randomBytes(12).toString("base64url");
       const roomToken = token();
-      const slots = Object.fromEntries(PORTS.map((port) => [port, { tokenHash: hash(token()), socket: null, connectionId: null }]));
-      const slotTokens = Object.fromEntries(PORTS.map((port) => [port, null]));
-      for (const port of PORTS) slotTokens[port] = token();
-      for (const port of PORTS) slots[port].tokenHash = hash(slotTokens[port]);
+      const slotTokens = Object.fromEntries(ports.map((port) => [port, token()]));
+      const slots = Object.fromEntries(ports.map((port) => [port, { tokenHash: hash(slotTokens[port]), socket: null, connectionId: null }]));
       const room = { id, tokenHash: hash(roomToken), slots, host: null, lastActivity: now() };
       rooms.set(id, room);
       const origin = forwardedOrigin(req);
-      return json(res, 201, { room: id, roomToken, hostUrl: `${origin}/host?room=${encodeURIComponent(id)}`, slots: PORTS.map((port) => ({ port, slotToken: slotTokens[port], guestUrl: `${origin}/play?room=${encodeURIComponent(id)}&slot=${encodeURIComponent(slotTokens[port])}` })) });
+      return json(res, 201, { room: id, roomToken, hostUrl: `${origin}/host?room=${encodeURIComponent(id)}`, slots: ports.map((port) => ({ port, slotToken: slotTokens[port], guestUrl: `${origin}/play?room=${encodeURIComponent(id)}&slot=${encodeURIComponent(slotTokens[port])}` })) });
     }
     const joinMatch = req.method === "POST" && url.pathname.match(/^\/api\/rooms\/([A-Za-z0-9_-]+)\/join$/);
     if (joinMatch) {
@@ -55,7 +56,7 @@ export function createApplication({ now = Date.now } = {}) {
       try {
         const body = await readJson(req);
         const supplied = typeof body.slotToken === "string" ? hash(body.slotToken) : Buffer.alloc(32);
-        const port = PORTS.find((p) => timingSafeEqual(room.slots[p].tokenHash, supplied));
+        const port = PORTS.find((p) => room.slots[p] && timingSafeEqual(room.slots[p].tokenHash, supplied));
         if (!port) return json(res, 403, { error: { code: "UNAUTHORIZED", message: "Invalid slot token" } });
         room.lastActivity = now();
         return json(res, 200, { port, slotSession: token() });
@@ -79,7 +80,7 @@ export function createApplication({ now = Date.now } = {}) {
     ws.smashMeta = { role, port: Number.isFinite(port) && port > 0 ? port : null, room: room?.id ?? null, connectionId: null };
     let authorized = false;
     if (room && role === "host") authorized = equal(room.tokenHash, hash(supplied));
-    if (room && role === "guest" && PORTS.includes(port)) authorized = equal(room.slots[port].tokenHash, hash(supplied));
+    if (room && role === "guest" && room.slots[port]) authorized = equal(room.slots[port].tokenHash, hash(supplied));
     if (!authorized) { sendError(ws, room ? "UNAUTHORIZED" : "ROOM_NOT_FOUND", room ? "Invalid room credentials" : "Room not found or expired"); ws.close(1008, "unauthorized"); return; }
     room.lastActivity = now();
     let connectionId;
@@ -105,15 +106,15 @@ export function createApplication({ now = Date.now } = {}) {
       const { type } = message;
       debugWs("in", ws, message);
       if (role === "host" && type === "offer") {
-        if (!PORTS.includes(message.port) || typeof message.sdp !== "string" || message.sdp.length > 900_000) return sendError(ws, "BAD_MESSAGE", "Invalid offer");
-        relay(room.slots[message.port].socket, { type, port: message.port, sdp: message.sdp });
+        if (!room.slots[message.port] || typeof message.sdp !== "string" || message.sdp.length > 900_000) return sendError(ws, "BAD_MESSAGE", "Invalid offer");
+        relay(room.slots[message.port]?.socket, { type, port: message.port, sdp: message.sdp });
       } else if (role === "guest" && type === "answer") {
         if (typeof message.sdp !== "string" || message.sdp.length > 900_000) return sendError(ws, "BAD_MESSAGE", "Invalid answer");
         relay(room.host, { type, port, sdp: message.sdp });
       } else if ((role === "host" || role === "guest") && type === "ice") {
         if (!Object.hasOwn(message, "candidate") || JSON.stringify(message.candidate).length > 100_000) return sendError(ws, "BAD_MESSAGE", "Invalid ICE candidate");
         const target = role === "host" ? room.slots[message.port]?.socket : room.host;
-        if (role === "host" && !PORTS.includes(message.port)) return sendError(ws, "BAD_MESSAGE", "Invalid port");
+        if (role === "host" && !room.slots[message.port]) return sendError(ws, "BAD_MESSAGE", "Invalid port");
         relay(target, { type, ...(role === "guest" ? { port } : { port: message.port }), candidate: message.candidate });
       } else sendError(ws, "INVALID_OPERATION", "Message type is not allowed for this role");
       room.lastActivity = now();

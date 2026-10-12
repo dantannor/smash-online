@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 
-const PORTS = [2, 3, 4];
+const PORTS = [1, 2, 3, 4];
 const TTL_MS = 30 * 60 * 1000;
 const MAX_SDP = 900_000;
 const enc = new TextEncoder();
@@ -23,7 +23,7 @@ export class Room extends DurableObject {
     const meta = await this.ctx.storage.get("meta");
     if (!meta) return { error: "ROOM_NOT_FOUND" };
     const supplied = await sha256(typeof slotToken === "string" ? slotToken : "");
-    const port = PORTS.find((candidate) => same(fromHex(meta.slotTokenHashes[candidate]), supplied));
+    const port = PORTS.find((candidate) => meta.slotTokenHashes[candidate] && same(fromHex(meta.slotTokenHashes[candidate]), supplied));
     if (!port) return { error: "UNAUTHORIZED" };
     await this.touch();
     return { port };
@@ -42,7 +42,7 @@ export class Room extends DurableObject {
     if (!meta) return reject("ROOM_NOT_FOUND", "Room not found or expired");
     let authorized = false;
     if (role === "host") authorized = same(fromHex(meta.roomTokenHash), supplied);
-    if (role === "guest" && PORTS.includes(port)) authorized = same(fromHex(meta.slotTokenHashes[port]), supplied);
+    if (role === "guest" && PORTS.includes(port) && meta.slotTokenHashes[port]) authorized = same(fromHex(meta.slotTokenHashes[port]), supplied);
     if (!authorized) return reject("UNAUTHORIZED", "Invalid room credentials");
     await this.touch();
     if (role === "host") {
