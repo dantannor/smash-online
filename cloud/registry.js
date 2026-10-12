@@ -14,10 +14,10 @@ export class Registry extends DurableObject {
     await this.ctx.storage.put("wakes", list.slice(-30));
   }
   async wakes() { return (await this.ctx.storage.get("wakes")) ?? []; }
-  // Slot claims for the current room. A port is taken while a guest is connected or it was claimed in the last CLAIM_TTL; a
+  // Slot claims for the current room. A port is taken while a guest is connected or it was claimed in the last 90 s; a
   // returning client (same token) always gets its own port back unless somebody else has since taken it.
   async claim({ room, client, port, connected }) {
-    const TTL = 180_000, now = Date.now();
+    const TTL = 90_000, now = Date.now();
     let claims = (await this.ctx.storage.get("claims")) ?? { room, byPort: {} };
     if (claims.room !== room) claims = { room, byPort: {} };
     const taken = (p) => connected.includes(p) || (claims.byPort[p] && now - claims.byPort[p].at < TTL && claims.byPort[p].client !== client);
