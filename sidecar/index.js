@@ -176,12 +176,25 @@ export function createSidecarServer(sidecar, { port = 8765, host = "127.0.0.1" }
   const httpServer = createServer();
   const wss = new WebSocketServer({ server: httpServer });
   let owner = null;
-  wss.on("connection", (ws) => {
+  let audioSource = null;
+  wss.on("connection", (ws, req) => {
+    const role = new URL(req.url, "http://127.0.0.1").searchParams.get("role");
+    if (role === "audio") {
+      if (audioSource) { ws.close(1013, "audio source already connected"); return; }
+      audioSource = ws;
+      ws.on("message", (raw, isBinary) => {
+        if (!isBinary || raw.length === 0 || raw.length % 8 !== 0) return ws.close(1003, "expected interleaved stereo float32 PCM");
+        if (owner?.readyState === 1) owner.send(raw, { binary: true });
+      });
+      ws.on("close", () => { if (audioSource === ws) audioSource = null; });
+      return;
+    }
     if (owner) { ws.close(1013, "sidecar already has a host"); return; }
     const client = { sendJson: (data) => { if (ws.readyState === 1) ws.send(JSON.stringify(data)); } };
     owner = ws;
     client.sendJson({ type: "ready" });
-    ws.on("message", (raw) => {
+    ws.on("message", (raw, isBinary) => {
+      if (isBinary) return sidecar.reject(client, "binary_not_allowed", "host messages must be JSON");
       let message;
       try { message = JSON.parse(raw.toString()); }
       catch { sidecar.reject(client, "malformed_json", "message must be valid JSON"); return; }

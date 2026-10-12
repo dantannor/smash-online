@@ -1,0 +1,9 @@
+{
+  "status": "BLOCKED",
+  "sourceApp": "SmashAudioToneStandin",
+  "test": "ScreenCaptureKit app-filter audio to localhost WebSocket",
+  "failure": "timed out waiting for nonzero ScreenCaptureKit PCM from the tone stand-in app",
+  "observed": "SCK found the stand-in app and started its stream, but no nonzero audio PCM arrived within 20 seconds; the audio output callback produced no sample records.",
+  "helper": "game/capture/sck-audio.swift",
+  "timestamp": "2026-10-11T13:20:50.226Z"
+}

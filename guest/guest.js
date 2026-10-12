@@ -141,8 +141,9 @@ function createPeer(ownGeneration) {
   peer.onicecandidate = ({ candidate }) => {
     if (candidate && ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'ice', candidate }));
   };
-  peer.ontrack = async ({ track, streams }) => {
-    stream = streams?.[0] || new MediaStream([track]);
+  peer.ontrack = async ({ track }) => {
+    stream ||= new MediaStream();
+    if (!stream.getTracks().some(existing => existing.id === track.id)) stream.addTrack(track);
     video.srcObject = stream; video.playsInline = true; video.muted = true;
     setReceiverLatency(track);
     hint.hidden = true;

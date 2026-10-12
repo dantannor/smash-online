@@ -30,6 +30,7 @@ test("host room links, canvas capture recovery, and guest input forwarding", { t
       let file;
       if (["/host", "/host/", "/host/index.html"].includes(url.pathname)) file = path.join(hostDir, "index.html");
       else if (url.pathname === "/host/host.js") file = path.join(hostDir, "host.js");
+      else if (url.pathname === "/host/audio-worklet.js") file = path.join(hostDir, "audio-worklet.js");
       else if (url.pathname === "/play/input-map.js") file = path.join(repoDir, "guest", "input-map.js");
       else if (url.pathname === "/shared/protocol.js") file = path.join(repoDir, "shared", "protocol.js");
       if (file) {
@@ -177,7 +178,7 @@ test("host page plays P1 from the keyboard through the sidecar, with keep-alive"
   sidecar.on("connection", ws => { ws.send(JSON.stringify({ type: "ready" })); ws.on("message", raw => messages.push(JSON.parse(raw.toString()))); });
   const server = http.createServer(async (request, response) => {
     const url = new URL(request.url, "http://localhost");
-    const files = { "/host": path.join(hostDir, "index.html"), "/host/host.js": path.join(hostDir, "host.js"), "/play/input-map.js": path.join(repoDir, "guest", "input-map.js"), "/shared/protocol.js": path.join(repoDir, "shared", "protocol.js") };
+    const files = { "/host": path.join(hostDir, "index.html"), "/host/host.js": path.join(hostDir, "host.js"), "/host/audio-worklet.js": path.join(hostDir, "audio-worklet.js"), "/play/input-map.js": path.join(repoDir, "guest", "input-map.js"), "/shared/protocol.js": path.join(repoDir, "shared", "protocol.js") };
     if (!files[url.pathname]) { response.writeHead(404).end(); return; }
     response.writeHead(200, { "content-type": files[url.pathname].endsWith(".js") ? "text/javascript" : "text/html" });
     response.end(await readFile(files[url.pathname]));

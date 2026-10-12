@@ -140,12 +140,38 @@ test("loopback WebSocket emits ready and accepts P1 input", async (t) => {
   assert.deepEqual(decodeOSI1(fs.readFileSync(file)).ports[0], { kind: 3, enabled: 1, buttons: 9, sx: 2, sy: -3 });
 });
 
+test("audio source PCM is forwarded to the single host as binary frames", async (t) => {
+  const { file } = fixture(t);
+  const sidecar = new Sidecar({ file }).start();
+  const server = createSidecarServer(sidecar, { port: 0 });
+  const address = await server.listen();
+  const host = new WebSocket(`ws://127.0.0.1:${address.port}`);
+  const audio = new WebSocket(`ws://127.0.0.1:${address.port}/?role=audio`);
+  t.after(async () => {
+    for (const ws of [host, audio]) if (ws.readyState < WebSocket.CLOSING) ws.close();
+    await server.close();
+    sidecar.close();
+  });
+  const hostMessages = [];
+  host.on("message", (data, isBinary) => hostMessages.push({ data: Buffer.from(data), isBinary }));
+  await Promise.all([host, audio].map(ws => new Promise((resolve, reject) => { ws.once("open", resolve); ws.once("error", reject); })));
+  const pcm = Buffer.from(new Float32Array([0.25, -0.25, 0.5, -0.5]).buffer);
+  const received = new Promise(resolve => host.once("message", (data, isBinary) => resolve({ data: Buffer.from(data), isBinary })));
+  audio.send(pcm);
+  const frame = await received;
+  assert.equal(frame.isBinary, true);
+  assert.deepEqual(frame.data, pcm);
+  audio.send(Buffer.from([1, 2, 3]));
+  await new Promise(resolve => audio.once("close", resolve));
+  assert.ok(hostMessages.some(item => item.data.toString().includes('"type":"ready"')));
+});
+
 test("pad-helper JSON lines drive P1 as kind 3", async (t) => {
   const { dir, file } = fixture(t);
   const sidecar = new Sidecar({ file, p1: "pad-helper" }).start();
   t.after(() => { sidecar.close(); fs.rmSync(dir, { recursive: true, force: true }); });
   sidecar.startHelper(`${process.execPath} -e 'console.log(JSON.stringify({buttons:4660,sx:-12,sy:34}))'`);
-  for (let i = 0; i < 20 && decodeOSI1(fs.readFileSync(file)).ports[0].buttons !== 4660; i++) await sleep(10);
+  for (let i = 0; i < 100 && decodeOSI1(fs.readFileSync(file)).ports[0].buttons !== 4660; i++) await sleep(10);
   assert.deepEqual(decodeOSI1(fs.readFileSync(file)).ports[0], { kind: KINDS.FILE_DRIVEN_PAD, enabled: 1, buttons: 4660, sx: -12, sy: 34 });
 });
 

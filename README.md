@@ -5,7 +5,7 @@ Local Smash 64 streaming/input prototype with a native game, OSI1 sidecar, signa
 ## Local setup
 
 1. Build the native game with the absolute local ROM path: `ROM_PATH='/Users/danieltannor/Downloads/Super Smash Bros. (USA).z64' ./game/build.sh`. The ROM and generated assets stay outside this repo.
-2. Start `./game/run-game.sh`. It opens BattleShip windowed at VS character select and builds `sck-capture` when needed.
+2. Start `./start.sh` (or `./game/run-game.sh`). It opens BattleShip windowed at VS character select and builds `sck-capture` when needed. The experimental app-audio helper is opt-in with `SMASH_AUDIO_CAPTURE=1 ./start.sh`; it connects to the sidecar at `ws://127.0.0.1:8765/?role=audio` and reconnects if the sidecar starts later.
 3. Start the sidecar in another terminal: `node sidecar/index.js --file /tmp/smash-online-input.osi1 --port 8765`.
 4. Start signaling with `npm start` (port 8787).
 5. Open `http://localhost:8787/host`, keep Capture source set to **Game window / screen**, click **Create room**, then click **Start capture** and share each guest's own link. If capture ends, click **Resume capture**; existing guests stay connected. The sidecar stays on the host Mac at loopback.
@@ -17,7 +17,7 @@ To stop a detached session started under `/tmp/smash-live`, run `./scripts/stop-
 
 Guests use a keyboard or standard gamepad. **Recommended P1:** keep the host page tab focused; its "Play P1 here" box (on by default) sends keyboard (WASD/arrows, J=A, K=B, L=Z, Enter=Start) and gamepad input to the sidecar as a kind-3 pad, like any guest. Legacy P1 (kind 2, only before the host page connects) uses the focused game-window keyboard: W/A/S/D or arrows, J for A, K for B, L for Z, Space/Return for Start. See [game controls](game/README.md). The DW4 harness drove P1 through the local sidecar test hook and P2 through the guest WebRTC data channel.
 
-The macOS BattleShip window capture produced a video track and no audio track. Guests therefore do not get game audio yet. `docs/evidence/dw8-audio.json` records the result and a no-install ScreenCaptureKit audio-bridge design. See [latency results](docs/LATENCY.md) and the [phone checklist](docs/PHONE-TEST.md).
+The macOS BattleShip window capture produced a video track and no audio track. Guests therefore do not get game audio yet. `docs/evidence/dw8-audio.json` records the original result; the ScreenCaptureKit app-audio stand-in test is currently blocked because the helper found its own tone app but received no audio samples (`docs/evidence/dw8-audio-sck-standin.json`). Keep `SMASH_AUDIO_CAPTURE` off until that capture test passes. When audio is enabled, the game still outputs to the Mac's default device; the host page routes captured PCM to WebRTC only, not to local speakers. ScreenCaptureKit filters the selected app rather than recording speaker output, but this run did not verify capture behavior with Mac output muted, so don't assume mute behavior without testing on the target Mac. No added-latency measurement is available yet. See [latency results](docs/LATENCY.md) and the [phone checklist](docs/PHONE-TEST.md).
 
 ## Tests
 

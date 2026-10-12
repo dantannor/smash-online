@@ -14,6 +14,9 @@ const peers = new Map();
 const statuses = new Map([2, 3, 4].map(port => [port, { status: "empty", ping: null }]));
 let roomInfo = null;
 let stream = null;
+let audioContext = null;
+let audioNode = null;
+let audioDestination = null;
 let signaling = null;
 let sidecar = null;
 let sidecarRetry = null;
@@ -163,7 +166,17 @@ async function createPeer(port, connectionId) {
   const pc = new RTCPeerConnection({ iceServers: await fetchIceServers() });
   const videoTrack = stream?.getVideoTracks()[0] || null;
   const videoTransceiver = pc.addTransceiver(videoTrack || "video", { direction: "sendonly" });
-  const peer = { pc, connectionId, channel: null, statsTimer: null, offerAt: 0, lastBytes: 0, lastStatsAt: 0, videoSender: videoTransceiver.sender };
+  const peer = { pc, connectionId, channel: null, statsTimer: null, offerAt: 0, lastBytes: 0, lastStatsAt: 0, videoSender: videoTransceiver.sender, audioSender: null };
+  const audioTrack = audioDestination?.stream.getAudioTracks()[0];
+  if (audioTrack) {
+    peer.audioSender = pc.addTrack(audioTrack, audioDestination.stream);
+    try {
+      const params = peer.audioSender.getParameters();
+      params.encodings = params.encodings?.length ? params.encodings : [{}];
+      params.encodings[0].maxBitrate = 128_000;
+      await peer.audioSender.setParameters(params);
+    } catch { /* Browser support varies. */ }
+  }
   for (const track of stream?.getAudioTracks() || []) pc.addTrack(track, stream);
   const videoCodec = RTCRtpSender.getCapabilities?.("video")?.codecs?.filter(codec => /H264/i.test(codec.mimeType)) || [];
   if (videoCodec.length && typeof RTCRtpTransceiver !== "undefined" && RTCRtpTransceiver.prototype.setCodecPreferences) {
@@ -250,10 +263,26 @@ function sendSidecar(message) {
 }
 const sidecarQueue = new Map();
 
+async function setupAudioCapture() {
+  if (audioDestination) { await audioContext.resume(); return; }
+  audioContext = new AudioContext({ sampleRate: 48000, latencyHint: "interactive" });
+  await audioContext.audioWorklet.addModule("/host/audio-worklet.js");
+  audioNode = new AudioWorkletNode(audioContext, "smash-pcm-player", { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] });
+  audioDestination = audioContext.createMediaStreamDestination();
+  audioNode.connect(audioDestination);
+  await audioContext.resume();
+}
+
 function connectSidecar() {
   clearTimeout(sidecarRetry);
   if (sidecar && [WebSocket.OPEN, WebSocket.CONNECTING].includes(sidecar.readyState)) return;
   sidecar = new WebSocket(sidecarUrl);
+  sidecar.binaryType = "arraybuffer";
+  sidecar.addEventListener("message", event => {
+    if (typeof event.data === "string") return;
+    const samples = new Float32Array(event.data);
+    if (audioNode && samples.length % 2 === 0) audioNode.port.postMessage(samples, [samples.buffer]);
+  });
   sidecar.addEventListener("open", () => {
     for (const [port, message] of sidecarQueue) sidecar.send(JSON.stringify(message));
     sidecarQueue.clear();
@@ -385,6 +414,7 @@ function stopCapture() {
 async function createRoom() {
   startButton.disabled = true;
   try {
+    await setupAudioCapture();
     roomInfo = await api("/api/rooms", { method: "POST", body: "{}" });
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(roomInfo));
     renderLinks(roomInfo.slots);
@@ -538,4 +568,5 @@ window.addEventListener("pagehide", () => {
   clearTimeout(sidecarRetry);
   for (const port of peers.keys()) closePeer(port);
   signaling?.close(); sidecar?.close(); stopCapture();
+  audioContext?.close().catch(() => {});
 });

@@ -28,6 +28,19 @@ cd "$GAME_DIR"
 "$BINARY" "$@" &
 pid=$!
 printf 'game_pid=%s\n' "$pid"
+
+if [[ "${SMASH_AUDIO_CAPTURE:-0}" != "0" ]]; then
+  AUDIO_HELPER="$BUILD_ROOT/bin/sck-audio"
+  if [[ ! -x "$AUDIO_HELPER" || "$ROOT/game/capture/sck-audio.swift" -nt "$AUDIO_HELPER" ]]; then
+    swiftc -parse-as-library -O -framework AppKit -framework ScreenCaptureKit -framework CoreMedia \
+      -o "$AUDIO_HELPER" "$ROOT/game/capture/sck-audio.swift"
+  fi
+  "$AUDIO_HELPER" "$pid" "${SMASH_AUDIO_SIDECAR_URL:-ws://127.0.0.1:8765/?role=audio}" &
+  audio_pid=$!
+  printf 'audio_helper_pid=%s\n' "$audio_pid"
+  cleanup_audio() { kill "$audio_pid" 2>/dev/null || true; }
+  trap cleanup_audio EXIT
+fi
 for _ in $(seq 1 100); do
   window_info="$(swift "$ROOT/game/window-id.swift" "$pid" 2>/dev/null || true)"
   if [[ -n "$window_info" ]]; then
