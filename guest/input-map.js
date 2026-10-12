@@ -30,6 +30,22 @@ export function mapGamepad(gamepad) {
   return result;
 }
 
+// Hold Shift for a half stick: SSB64 smash attacks need a full-stick flick, tilts and walking use less.
+export const TILT_STICK = 40;
+
+// event.code is the physical key, so a Hebrew or other layout still gets WASD/JKL, and Shift cannot change a held key's name
+// (with event.key, 'd' down then Shift+release produced 'D' up and left 'd' stuck).
+export function logicalKeys(codes) {
+  const out = new Set();
+  for (const code of codes) {
+    if (/^Key[A-Z]$/.test(code)) out.add(code.slice(3).toLowerCase());
+    else if (code === 'ShiftLeft' || code === 'ShiftRight') out.add('Shift');
+    else if (code === 'Enter' || code === 'NumpadEnter') out.add('Enter');
+    else if (code.startsWith('Arrow')) out.add(code);
+  }
+  return out;
+}
+
 export function mapKeyboard(keys) {
   const result = emptyInput();
   const has = (key) => keys instanceof Set ? keys.has(key) : Boolean(keys?.[key]);
@@ -50,6 +66,7 @@ export function mapKeyboard(keys) {
   set('i', BUTTONS.C_RIGHT); set('I', BUTTONS.C_RIGHT);
   set('ArrowUp', BUTTONS.UP); set('ArrowDown', BUTTONS.DOWN);
   set('ArrowLeft', BUTTONS.LEFT); set('ArrowRight', BUTTONS.RIGHT);
+  if (has('Shift')) { result.sx = Math.sign(result.sx) * TILT_STICK; result.sy = Math.sign(result.sy) * TILT_STICK; }
   return result;
 }
 

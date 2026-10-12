@@ -10,8 +10,7 @@ ws.on("message", data => {
   const m = JSON.parse(data);
   if (m.id !== 1) return;
   const out = m.result?.result?.value ?? m.result?.exceptionDetails?.text ?? m.error;
-  console.log(typeof out === "string" ? out : JSON.stringify(out));
-  process.exit(0);
+  process.stdout.write((typeof out === "string" ? out : JSON.stringify(out)) + "\n", () => process.exit(0)); // flush before exiting: pipes truncate at 64 KB otherwise
 });
 ws.send(JSON.stringify({ id: 1, method: "Runtime.evaluate", params: { expression: process.argv[2], returnByValue: true, awaitPromise: true, userGesture: true } }));
 setTimeout(() => { console.error("timeout"); process.exit(2); }, 20000);
