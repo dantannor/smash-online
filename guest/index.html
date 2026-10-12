@@ -14,7 +14,8 @@
     .top{flex:none;display:flex;align-items:center;justify-content:space-between;gap:12px}.title{font-size:1.1rem;font-weight:700}.stats{display:flex;gap:16px;color:#c4c7d0;font-size:.9rem;flex-wrap:wrap}
     .screen{position:relative;flex:1;min-height:0;width:100%;background:#000;border-radius:12px;overflow:hidden}
     .screen:fullscreen{border-radius:0}.screen:-webkit-full-screen{border-radius:0}
-    video{display:block;width:100%;height:100%;object-fit:contain;background:#000}
+    video{position:absolute;inset:0;display:block;width:100%;height:100%;object-fit:contain;background:#000}
+    #audio{display:none}
     .buttons{flex:none;display:flex;gap:10px;justify-content:center}.action{border:0;border-radius:999px;padding:10px 20px;color:white;background:#5b5be8;font:inherit;font-weight:700;cursor:pointer}.action.secondary{background:#272b36}
     .hint{position:absolute;inset:12px 16px auto;text-align:center;color:#d4d4d8;background:#10131bdc;border-radius:8px;padding:10px}
     .legend{flex:none;margin:0;text-align:center;color:#aeb2bf;font-size:.8rem}
@@ -25,7 +26,7 @@
 <body>
   <main class="app">
     <header class="top"><div class="title">Smash Online <span id="slot">Guest</span></div><div class="stats"><span id="connection">Connecting…</span><span id="ping">RTT: --</span><span id="fps">FPS: --</span><span id="controller">Controller: Keyboard</span></div></header>
-    <section class="screen" id="screen"><video id="video" autoplay muted playsinline></video><div class="hint" id="hint">Waiting for the host…</div></section>
+    <section class="screen" id="screen"><video id="video" autoplay muted playsinline></video><audio id="audio" autoplay></audio><div class="hint" id="hint">Waiting for the host…</div></section>
     <div class="buttons"><button class="action" id="sound" type="button">Click to enable sound</button><button class="action secondary" id="fullscreen" type="button">Fullscreen (F)</button></div>
     <p class="legend">WASD / arrows: stick · J: A · K: B · L: Z · Shift: half stick (tilt) · F: fullscreen</p>
     <details class="help"><summary>Controls</summary>

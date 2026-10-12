@@ -2,6 +2,7 @@ import { mapGamepad, mapKeyboard, logicalKeys } from './input-map.js';
 import { clampInputMessage } from '../shared/protocol.js';
 
 const video = document.querySelector('#video');
+const audio = document.querySelector('#audio');
 const hint = document.querySelector('#hint');
 const connection = document.querySelector('#connection');
 const slotLabel = document.querySelector('#slot');
@@ -10,8 +11,8 @@ const room = params.get('room');
 const slotToken = params.get('slot');
 const keyState = new Set();
 const state = { connection: 'connecting', connected: false, slot: null, port: null, controller: 'Keyboard', ping: null, fps: null, error: null };
-let peer, ws, dataChannel, stream;
-let soundOn = false; // autoplay needs a user gesture: any first click or key press turns sound on
+let peer, ws, dataChannel, videoStream, audioStream;
+let soundOn = false; // the video is always muted (so it autoplays everywhere); a user gesture only unlocks the separate audio element
 let reconnectTimer, reconnectDelay = 500, generation = 0, sequence = 0;
 let virtualInput = null;
 let lastInput = { buttons: 0, sx: 0, sy: 0 };
@@ -137,18 +138,34 @@ async function handleSignal(raw, ownGeneration) {
   } catch (error) { scheduleReconnect(error?.message || 'offer failed'); }
 }
 const pendingIce = [];
+function attachStreams() {
+  if (video.srcObject !== videoStream) video.srcObject = videoStream; // re-attach after a renegotiation or a new peer
+  video.muted = true; video.playsInline = true;
+  if (audio.srcObject !== audioStream) audio.srcObject = audioStream;
+}
+const videoIsPlaying = () => !video.paused && !video.ended && video.readyState >= 2;
+function showPlayHint() { if (!videoIsPlaying() && video.srcObject) { hint.hidden = false; hint.textContent = 'Video is ready. Tap the screen to start playback.'; } }
+// Safe to call from anywhere (gestures, track events, visibility): starts whatever is not playing yet. The hint is only
+// ever driven by the element's real state, never by a play() promise that a later load can reject after playback began.
+async function ensurePlaying() {
+  if (!video.srcObject) return;
+  video.muted = true;
+  if (video.paused) { try { await video.play(); } catch { /* shown below if it is still stopped */ } }
+  if (soundOn && audioStream?.getAudioTracks().length && audio.paused) { audio.muted = false; try { await audio.play(); } catch { /* retried on the next gesture */ } }
+  if (videoIsPlaying()) hint.hidden = true; else showPlayHint();
+}
 function createPeer(ownGeneration) {
   peer = new RTCPeerConnection({ iceServers, iceTransportPolicy: relayOnly ? 'relay' : 'all' });
   peer.onicecandidate = ({ candidate }) => {
     if (candidate && ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'ice', candidate }));
   };
-  stream = new MediaStream(); // video and audio arrive as separate tracks; play them through one element
-  peer.ontrack = async ({ track }) => {
-    stream.addTrack(track);
-    video.srcObject = stream; video.playsInline = true; video.muted = !soundOn;
-    if (track.kind === 'video') setReceiverLatency(track);
-    hint.hidden = true;
-    try { await video.play(); } catch { hint.hidden = false; hint.textContent = 'Video is ready. Tap the screen to start playback.'; }
+  // Video and audio play through separate elements: the muted video never waits on an audio gesture (Safari/WebKit autoplay rules).
+  videoStream = new MediaStream(); audioStream = new MediaStream();
+  peer.ontrack = ({ track }) => {
+    if (track.kind === 'video') { videoStream.addTrack(track); setReceiverLatency(track); } else audioStream.addTrack(track);
+    track.onunmute = () => ensurePlaying();
+    attachStreams();
+    ensurePlaying();
   };
   peer.ondatachannel = ({ channel }) => {
     if (channel.label !== 'input') { channel.close(); return; }
@@ -195,15 +212,17 @@ window.addEventListener('keydown', event => {
   keyState.add(event.code); sendInput();
 });
 window.addEventListener('keyup', event => { keyState.delete(event.code); sendInput(); });
-document.addEventListener('visibilitychange', () => { if (document.hidden) { keyState.clear(); sendInput(true); } });
+document.addEventListener('visibilitychange', () => { if (document.hidden) { keyState.clear(); sendInput(true); } else void ensurePlaying(); });
 window.addEventListener('blur', () => { keyState.clear(); sendInput(true); });
 window.addEventListener('gamepadconnected', () => sendInput(true));
 window.addEventListener('gamepaddisconnected', () => sendInput(true));
-video.addEventListener('playing', () => { hint.hidden = true; });
+for (const type of ['playing', 'loadedmetadata', 'loadeddata', 'canplay', 'pause', 'emptied', 'stalled']) video.addEventListener(type, () => { if (type === 'playing') hint.hidden = true; else void ensurePlaying(); });
+video.addEventListener('timeupdate', () => { if (!hint.hidden && videoIsPlaying()) hint.hidden = true; });
 const soundButton = document.querySelector('#sound');
-async function enableSound() { soundOn = true; video.muted = false; soundButton.textContent = 'Sound on'; try { await video.play(); } catch {} }
+async function enableSound() { soundOn = true; soundButton.textContent = 'Sound on'; await ensurePlaying(); }
 soundButton.addEventListener('click', enableSound);
-for (const type of ['pointerdown', 'keydown']) window.addEventListener(type, () => { if (!soundOn) enableSound(); }, { once: true });
+// Any gesture (click, tap, key press) starts playback and unlocks sound; later ones retry if something is still stopped.
+for (const type of ['pointerdown', 'touchend', 'click', 'keydown']) window.addEventListener(type, () => { if (!soundOn) void enableSound(); else void ensurePlaying(); }, { capture: true });
 const screenEl = document.querySelector('#screen');
 const fullscreenButton = document.querySelector('#fullscreen');
 const fullscreenElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
@@ -216,11 +235,11 @@ async function toggleFullscreen() {
     else if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
   } catch { try { video.webkitEnterFullscreen?.(); } catch { /* not available */ } }
 }
-fullscreenButton.addEventListener('click', toggleFullscreen);
+fullscreenButton.addEventListener('click', () => { void ensurePlaying(); toggleFullscreen(); });
 for (const type of ['fullscreenchange', 'webkitfullscreenchange']) document.addEventListener(type, () => { fullscreenButton.textContent = fullscreenElement() ? 'Exit fullscreen (Esc)' : 'Fullscreen (F)'; });
 window.addEventListener('keydown', event => { if (event.code === 'KeyF' && !event.repeat && !event.metaKey && !event.ctrlKey && !event.altKey) toggleFullscreen(); });
 setInterval(() => sendInput(true), 1000 / 60);
-window.__smashGuest = { state, stats: async () => ({ ...state, rtcStats: peer ? [...(await peer.getStats()).values()] : [] }), get lastInput() { return { ...lastInput }; }, setVirtualInput };
+window.__smashGuest = { state, ensurePlaying, stats: async () => ({ ...state, rtcStats: peer ? [...(await peer.getStats()).values()] : [] }), get lastInput() { return { ...lastInput }; }, setVirtualInput };
 if (params.get('fakeInput') === 'script') {
   let tick = 0; setInterval(() => { tick++; setVirtualInput({ buttons: tick % 2 ? 0x8000 : 0, sx: tick % 2 ? 30 : -30, sy: 0 }); }, 500);
 }
