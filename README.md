@@ -44,6 +44,25 @@ The macOS BattleShip window capture produced a video track and no audio track. G
 - The host tab must be foreground for `getDisplayMedia` (Chrome refuses it on a backgrounded page with `InvalidStateError`).
 - Tests: `node --test cloud/worker.test.js` (starts `wrangler dev --local`).
 
+## Running on Google Cloud (Tel Aviv VM)
+
+The whole stack (game, OSI1 sidecar, local server, host page in Chrome) can run on a GCE VM instead of your Mac, and all four players, P1 included, join with a browser link.
+
+```sh
+scripts/cloud.sh up        # create or start the VM, wait for a room, print the P1-P4 links (about 1 minute from a stopped VM)
+scripts/cloud.sh down      # stop the VM; the disk is kept, so the next `up` skips the build
+scripts/cloud.sh status | links | newroom | sync | idle <bootGraceMin> <idleMin> | ssh [cmd]
+```
+
+- **First run** (VM missing) creates `smash-online` (c2d-highcpu-8, me-west1-c, Ubuntu 24.04, 60 GB disk, Release build), uploads your ROM (`SMASH_ROM_PATH`, default `~/Downloads/Super Smash Bros. (USA).z64`) to the VM only, builds the game, stages the custom roster and installs the services. Expect about 20 to 25 minutes. It needs `gcloud` authenticated for the project (`SMASH_GCP_PROJECT`, default `smash-online-511318`; `SMASH_GCLOUD` points at the binary). Optional settings go in `~/.smash-online/cloud.env`.
+- **Services** (systemd, all restart on failure): `smash-xvfb` (640x480 virtual display), `smash-game` (Release build with `SSB64_ROSTER_FILE`; restarted by systemd when the engine aborts, which replaces `game-watchdog.sh`), `smash-sidecar` (restarted when the OSI1 file gets a new inode), `smash-server` (host page on 127.0.0.1:8787), `smash-chrome` (host page with `?p1guest=1`, so P1 is a guest slot and "Play P1 here" is off) and `smash-ctl`. `smash-ctl` drives Chrome over its DevTools port: it creates the room, clicks Start capture (and again if capture ever ends), publishes the links to GCE guest attributes (`smash/status`), and runs the idle shutdown. Capture is the whole virtual screen, so a game restart needs no click: guests see a few black seconds and then the new game.
+- **Signaling and media** use the existing Cloudflare Worker and its TURN relay. The Worker's `POST /api/rooms` accepts `{"p1Guest": true}` to add a P1 slot; without it rooms stay P2-P4. `?p1guest=1` on the host page sends it.
+- **Access**: the VM has no service account. Port 22 is not exposed. SSH runs over TLS on 443 (stunnel to sshd, key-only, no root login, dedicated key in `~/.smash-online/`), and the firewall rule `smash-allow-ssh-tls` admits only your current public IP as a /32; `cloud.sh up` refreshes it on every run, so `up` again after your IP changes. A `smash-allow-iap-ssh` rule (IAP range) is also kept in case IAP is enabled for the project later. Links reach your Mac through guest attributes, with no inbound port at all.
+- **Idle shutdown**: the VM powers itself off after `SMASH_BOOT_GRACE_MIN` (default 30) minutes from boot with no guest ever connected, and after `SMASH_IDLE_MIN` (default 15) minutes with no guest connected once a session has happened. Change them live with `scripts/cloud.sh idle 30 15` (stored in `/etc/smash-online.env` on the VM). A guest tab left open counts as connected.
+- **Cost** (estimates, check the billing page): the VM is roughly $0.40 per hour while running (c2d-highcpu-8, Tel Aviv) and nothing for compute when stopped; the 60 GB disk is a few cents a day. Egress is the variable part: each guest receives up to 6 Mbps (about 2.7 GB per hour, roughly $0.30 to $0.60 per hour per guest at internet egress rates), and a static menu screen costs almost nothing. Plan on about $1 to $2 per hour for four active players, and run `scripts/cloud.sh down` when you finish.
+- **Measured** (2026-10-12, Mac on this Wi-Fi, P1 and P2 as headless guests for 30 s on the character-select screen): ICE pair relay/udp to srflx/udp, RTT 73 to 80 ms average (max 131; the symmetric NAT forces the Cloudflare relay, so this is the relay path, not a direct 8-20 ms one), 54 to 60 fps, 0 to 1 packets lost, P1 input moved the P1 cursor. A cold `up` from a stopped VM took 65 s. The VM held 100% of one core for the game (llvmpipe) and about 10% each for the two Chrome processes.
+- **Limits**: game audio is still not sent (no audio track, same as on the Mac). The engine still aborts about every 3 hours (systemd restarts it; a match in progress is lost). The ROM lives only on the VM disk (`~/rom.z64`), never in the repo, a bucket or an image. `cloud.sh sync` copies the current checkout to the VM and reinstalls the services.
+
 ## Custom fighters (opensmash roster)
 
 The game can show opensmash's custom fighters (smash.fun catalog, ~1000 total) on extra character-select pages, next to the 12 vanilla ones.
