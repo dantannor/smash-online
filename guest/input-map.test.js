@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mapGamepad, mapKeyboard } from './input-map.js';
+import { mapGamepad, mapKeyboard, logicalKeys, TILT_STICK } from './input-map.js';
 import { BUTTONS } from '../shared/protocol.js';
 
 test('standard gamepad controls map to N64 buttons and analog axes', () => {
@@ -32,4 +32,16 @@ test('WASD and arrows follow the game stick convention (up is +sy)', () => {
     assert.deepEqual({ sx: result.sx, sy: result.sy }, { sx, sy }, keys.join());
   }
   assert.equal(mapGamepad({ buttons: [], axes: [0, -1] }).sy, 80, 'stick pushed up');
+});
+
+test('Shift is a half-stick tilt modifier and does not change buttons', () => {
+  assert.deepEqual(mapKeyboard(new Set(['d', 'j'])), { buttons: BUTTONS.A, sx: 80, sy: 0 });
+  assert.deepEqual(mapKeyboard(new Set(['Shift', 'd', 'j'])), { buttons: BUTTONS.A, sx: TILT_STICK, sy: 0 });
+  assert.deepEqual(mapKeyboard(new Set(['Shift', 'a', 's'])), { buttons: 0, sx: -TILT_STICK, sy: -TILT_STICK });
+  assert.equal(TILT_STICK > 8 && TILT_STICK < 53, true, 'between walking and the smash flick threshold');
+});
+
+test('keys are read from event.code so layout and Shift cannot change or strand a held key', () => {
+  assert.deepEqual([...logicalKeys(['KeyD', 'KeyJ', 'ShiftLeft', 'ArrowUp', 'NumpadEnter', 'Space'])].sort(), ['ArrowUp', 'Enter', 'Shift', 'd', 'j']);
+  assert.deepEqual(mapKeyboard(logicalKeys(['KeyD', 'KeyK'])), { buttons: BUTTONS.B, sx: 80, sy: 0 });
 });

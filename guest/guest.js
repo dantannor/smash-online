@@ -1,4 +1,4 @@
-import { mapGamepad, mapKeyboard } from './input-map.js';
+import { mapGamepad, mapKeyboard, logicalKeys } from './input-map.js';
 import { clampInputMessage } from '../shared/protocol.js';
 
 const video = document.querySelector('#video');
@@ -41,10 +41,10 @@ function getInput() {
   const pad = [...(navigator.getGamepads?.() || [])].find(Boolean);
   if (pad) {
     state.controller = pad.id || 'Gamepad';
-    return merge(mapGamepad(pad), mapKeyboard(keyState));
+    return merge(mapGamepad(pad), mapKeyboard(logicalKeys(keyState)));
   }
   state.controller = 'Keyboard';
-  return mapKeyboard(keyState);
+  return mapKeyboard(logicalKeys(keyState));
 }
 function merge(a, b) { return { buttons: a.buttons | b.buttons, sx: a.sx || b.sx, sy: a.sy || b.sy }; }
 function updateController() { document.querySelector('#controller').textContent = `Controller: ${state.controller}`; }
@@ -188,19 +188,37 @@ async function readStats() {
     document.querySelector('#fps').textContent = `FPS: ${fps == null ? '--' : Math.round(fps)}`;
   } catch { /* stats are diagnostic only */ }
 }
-window.addEventListener('keydown', event => { if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(event.key)) event.preventDefault(); keyState.add(event.key); sendInput(); });
-window.addEventListener('keyup', event => { keyState.delete(event.key); sendInput(); });
+const GAME_CODES = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space']);
+window.addEventListener('keydown', event => {
+  if (event.metaKey || event.ctrlKey || event.altKey) return; // browser shortcuts: their keyups never arrive
+  if (GAME_CODES.has(event.code)) event.preventDefault();
+  keyState.add(event.code); sendInput();
+});
+window.addEventListener('keyup', event => { keyState.delete(event.code); sendInput(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) { keyState.clear(); sendInput(true); } });
 window.addEventListener('blur', () => { keyState.clear(); sendInput(true); });
 window.addEventListener('gamepadconnected', () => sendInput(true));
 window.addEventListener('gamepaddisconnected', () => sendInput(true));
-video.addEventListener('loadedmetadata', () => {
-  if (video.videoWidth && video.videoHeight) document.querySelector('#screen').style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
-});
+video.addEventListener('playing', () => { hint.hidden = true; });
 const soundButton = document.querySelector('#sound');
 async function enableSound() { soundOn = true; video.muted = false; soundButton.textContent = 'Sound on'; try { await video.play(); } catch {} }
 soundButton.addEventListener('click', enableSound);
 for (const type of ['pointerdown', 'keydown']) window.addEventListener(type, () => { if (!soundOn) enableSound(); }, { once: true });
-document.querySelector('#fullscreen').addEventListener('click', async () => { const target = document.querySelector('#screen'); try { if (!document.fullscreenElement) await target.requestFullscreen(); else await document.exitFullscreen(); } catch {} });
+const screenEl = document.querySelector('#screen');
+const fullscreenButton = document.querySelector('#fullscreen');
+const fullscreenElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
+// The video container goes fullscreen (so the hint and letterboxing stay ours); iPhone Safari only allows the <video> itself.
+async function toggleFullscreen() {
+  try {
+    if (fullscreenElement()) { await (document.exitFullscreen?.() || document.webkitExitFullscreen?.()); return; }
+    if (screenEl.requestFullscreen) await screenEl.requestFullscreen({ navigationUI: 'hide' });
+    else if (screenEl.webkitRequestFullscreen) screenEl.webkitRequestFullscreen();
+    else if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
+  } catch { try { video.webkitEnterFullscreen?.(); } catch { /* not available */ } }
+}
+fullscreenButton.addEventListener('click', toggleFullscreen);
+for (const type of ['fullscreenchange', 'webkitfullscreenchange']) document.addEventListener(type, () => { fullscreenButton.textContent = fullscreenElement() ? 'Exit fullscreen (Esc)' : 'Fullscreen (F)'; });
+window.addEventListener('keydown', event => { if (event.code === 'KeyF' && !event.repeat && !event.metaKey && !event.ctrlKey && !event.altKey) toggleFullscreen(); });
 setInterval(() => sendInput(true), 1000 / 60);
 window.__smashGuest = { state, stats: async () => ({ ...state, rtcStats: peer ? [...(await peer.getStats()).values()] : [] }), get lastInput() { return { ...lastInput }; }, setVirtualInput };
 if (params.get('fakeInput') === 'script') {

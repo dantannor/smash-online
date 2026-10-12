@@ -7,14 +7,15 @@ import { WebSocketServer } from "ws";
 import { encodeOSI1, KINDS, clampInputMessage } from "../shared/protocol.js";
 
 const REFRESH_MS = 100;
-const TIMEOUT_MS = 500;
+const DEFAULT_TIMEOUT_MS = 500; // class default (contract); the CLI passes a longer one, see --input-timeout-ms
 const neutral = () => ({ kind: KINDS.DISCONNECTED, enabled: 0, buttons: 0, sx: 0, sy: 0 });
 
 export class Sidecar {
-  constructor({ file, p1 = "keyboard", mute = false, now = Date.now, onError = console.error }) {
+  constructor({ file, p1 = "keyboard", mute = false, inputTimeoutMs = DEFAULT_TIMEOUT_MS, now = Date.now, onError = console.error }) {
     if (!file) throw new TypeError("an OSI1 file path is required");
     this.file = path.resolve(file);
     this.now = now;
+    this.timeoutMs = inputTimeoutMs; // silence longer than this neutralizes a guest; shorter stalls hold the last input
     this.onError = onError;
     this.seq = 0;
     this.slots = Array.from({ length: 4 }, neutral);
@@ -95,11 +96,11 @@ export class Sidecar {
 
   armTimeout(index, connection) {
     clearTimeout(connection.timeout);
-    const remaining = Math.max(0, TIMEOUT_MS - (this.now() - connection.lastInputAt));
+    const remaining = Math.max(0, this.timeoutMs - (this.now() - connection.lastInputAt));
     connection.timeout = setTimeout(() => {
       if (this.connections[index] !== connection) return;
       const elapsed = this.now() - connection.lastInputAt;
-      if (elapsed < TIMEOUT_MS) return this.armTimeout(index, connection);
+      if (elapsed < this.timeoutMs) return this.armTimeout(index, connection);
       connection.timeout = null;
       this.slots[index] = { ...neutral(), kind: KINDS.FILE_DRIVEN_PAD, enabled: 1 };
       this.writeSnapshot();
@@ -213,16 +214,18 @@ export function createSidecarServer(sidecar, { port = 8765, host = "127.0.0.1" }
 }
 
 function parseArgs(argv) {
-  const args = { file: null, port: 8765, p1: "keyboard", mute: false };
+  const args = { file: null, port: 8765, p1: "keyboard", mute: false, inputTimeoutMs: 2500 };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--file") args.file = argv[++i];
     else if (argv[i] === "--port") args.port = Number(argv[++i]);
     else if (argv[i] === "--p1") args.p1 = argv[++i];
     else if (argv[i] === "--mute") args.mute = true;
+    else if (argv[i] === "--input-timeout-ms") args.inputTimeoutMs = Number(argv[++i]);
     else throw new Error(`unknown option: ${argv[i]}`);
   }
-  if (!args.file) throw new Error("usage: node sidecar/index.js --file <path> [--port 8765] [--p1 pad-helper:<cmd>] [--mute]");
+  if (!args.file) throw new Error("usage: node sidecar/index.js --file <path> [--port 8765] [--p1 pad-helper:<cmd>] [--mute] [--input-timeout-ms 2500]");
   if (!Number.isInteger(args.port) || args.port < 1 || args.port > 65535) throw new Error("--port must be a valid TCP port");
+  if (!Number.isFinite(args.inputTimeoutMs) || args.inputTimeoutMs < 100) throw new Error("--input-timeout-ms must be at least 100");
   if (args.p1 !== "keyboard" && !args.p1.startsWith("pad-helper:")) throw new Error("--p1 must be keyboard or pad-helper:<cmd>");
   return args;
 }
@@ -231,7 +234,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   try {
     const args = parseArgs(process.argv.slice(2));
     const p1 = args.p1.startsWith("pad-helper:") ? args.p1 : args.p1;
-    const sidecar = new Sidecar({ file: args.file, p1, mute: args.mute }).start();
+    const sidecar = new Sidecar({ file: args.file, p1, mute: args.mute, inputTimeoutMs: args.inputTimeoutMs }).start();
     if (p1.startsWith("pad-helper:")) sidecar.startHelper(p1.slice("pad-helper:".length));
     const server = createSidecarServer(sidecar, { port: args.port });
     server.listen().then((address) => console.log(`sidecar listening on ws://${address.address}:${address.port}`)).catch((error) => { console.error(error); process.exitCode = 1; sidecar.close(); });

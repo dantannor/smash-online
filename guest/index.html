@@ -6,15 +6,32 @@
   <meta name="color-scheme" content="dark">
   <title>Smash Online | Guest</title>
   <style>
-    :root{font:16px system-ui,sans-serif;color:#f4f4f5;background:#090b10}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center}.app{width:min(100vw,1200px);padding:20px}.top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}.title{font-size:1.1rem;font-weight:700}.stats{display:flex;gap:16px;color:#c4c7d0;font-size:.9rem;flex-wrap:wrap}.screen{position:relative;width:100%;aspect-ratio:4/3;background:#151821;overflow:hidden;border-radius:12px;display:grid;place-items:center}video{display:block;width:100%;height:100%;object-fit:contain;background:#000}.buttons{display:flex;gap:10px;justify-content:center;margin-top:14px}.action{border:0;border-radius:999px;padding:14px 22px;color:white;background:#5b5be8;font:inherit;font-weight:700;cursor:pointer}.action.secondary{background:#272b36}.hint{position:absolute;inset:auto 16px 16px;text-align:center;color:#d4d4d8;background:#10131bdc;border-radius:8px;padding:10px}.help{margin:16px auto 0;max-width:720px;color:#aeb2bf;font-size:.85rem;line-height:1.5}.help summary{cursor:pointer;color:#e4e4e7}.error{color:#ff9b9b}
+    :root{font:16px system-ui,sans-serif;color:#f4f4f5;background:#090b10}*{box-sizing:border-box}
+    html,body{height:100%;margin:0;overflow:hidden;background:#090b10}
+    /* One column that is exactly the viewport tall: the video box takes whatever is left and the 4:3 frame letterboxes inside it,
+       so the bottom of the picture (the damage HUD) is never pushed below the fold. */
+    .app{height:100vh;height:100dvh;display:flex;flex-direction:column;gap:8px;padding:10px 14px}
+    .top{flex:none;display:flex;align-items:center;justify-content:space-between;gap:12px}.title{font-size:1.1rem;font-weight:700}.stats{display:flex;gap:16px;color:#c4c7d0;font-size:.9rem;flex-wrap:wrap}
+    .screen{position:relative;flex:1;min-height:0;width:100%;background:#000;border-radius:12px;overflow:hidden}
+    .screen:fullscreen{border-radius:0}.screen:-webkit-full-screen{border-radius:0}
+    video{display:block;width:100%;height:100%;object-fit:contain;background:#000}
+    .buttons{flex:none;display:flex;gap:10px;justify-content:center}.action{border:0;border-radius:999px;padding:10px 20px;color:white;background:#5b5be8;font:inherit;font-weight:700;cursor:pointer}.action.secondary{background:#272b36}
+    .hint{position:absolute;inset:12px 16px auto;text-align:center;color:#d4d4d8;background:#10131bdc;border-radius:8px;padding:10px}
+    .legend{flex:none;margin:0;text-align:center;color:#aeb2bf;font-size:.8rem}
+    .help{flex:none;margin:0 auto;max-width:760px;color:#aeb2bf;font-size:.85rem;line-height:1.5}.help summary{cursor:pointer;color:#e4e4e7;text-align:center}.help[open]{max-height:38vh;overflow:auto}.error{color:#ff9b9b}
+    @media (max-height:520px){.app{padding:4px 8px;gap:4px}.title{font-size:.9rem}.stats{font-size:.7rem;gap:8px}.action{padding:5px 14px;font-size:.8rem}.legend,.help{display:none}}
   </style>
 </head>
 <body>
   <main class="app">
     <header class="top"><div class="title">Smash Online <span id="slot">Guest</span></div><div class="stats"><span id="connection">Connecting…</span><span id="ping">RTT: --</span><span id="fps">FPS: --</span><span id="controller">Controller: Keyboard</span></div></header>
     <section class="screen" id="screen"><video id="video" autoplay muted playsinline></video><div class="hint" id="hint">Waiting for the host…</div></section>
-    <div class="buttons"><button class="action" id="sound" type="button">Click to enable sound</button><button class="action secondary" id="fullscreen" type="button">Fullscreen</button></div>
-    <details class="help"><summary>Controls</summary><p>Gamepad: standard mapping, A→A, B/X→B, LT/RT→Z, LB→L, RB→R, Y and right stick→C buttons, D-pad→D-pad, Start→Start. Left stick→analog stick (deadzone 15%, range ±80).</p><p>Keyboard: arrows or WASD move the stick; arrows also press D-pad. J=A, K=B, L=Z, Q=L, E=R, Enter=Start; U/N/H/I are C-up/down/left/right.</p></details>
+    <div class="buttons"><button class="action" id="sound" type="button">Click to enable sound</button><button class="action secondary" id="fullscreen" type="button">Fullscreen (F)</button></div>
+    <p class="legend">WASD / arrows: stick · J: A · K: B · L: Z · Shift: half stick (tilt) · F: fullscreen</p>
+    <details class="help"><summary>Controls</summary>
+      <p>Keyboard: WASD or arrows move the stick at full tilt, and arrows also press the D-pad. <b>Hold Shift for a half stick</b> (tilts and walking). J=A, K=B, L=Z, Q=L, E=R, Enter=Start, U/N/H/I = C-up/down/left/right, F = fullscreen (Esc leaves it).</p>
+      <p><b>Smash attack:</b> press a direction and J (A) together, or flick the stick and press A within a few frames. <b>Tilt:</b> hold Shift, a direction and J. This is Smash 64: there is no smash charging by holding A. Holding does matter for DK's Giant Punch and Samus's Charge Shot (hold K, B), for repeating jabs (hold J) and for running or shielding.</p>
+      <p>Gamepad: standard mapping, A→A, B/X→B, LT/RT→Z, LB→L, RB→R, Y and right stick→C buttons, D-pad→D-pad, Start→Start. Left stick→analog stick (deadzone 15%, range ±80).</p></details>
   </main>
   <script type="module" src="/play/guest.js"></script>
 </body>

@@ -73,6 +73,19 @@ test("input timeout neutralizes but keeps the slot connected, then resumes", asy
   assert.deepEqual(decodeOSI1(fs.readFileSync(file)).ports[1], { kind: 3, enabled: 1, buttons: 16, sx: -4, sy: 7 });
 });
 
+test("a stall shorter than inputTimeoutMs holds the last input instead of dropping to neutral", async (t) => {
+  const { file } = fixture(t);
+  const sidecar = new Sidecar({ file, inputTimeoutMs: 1200 }).start();
+  t.after(() => sidecar.close());
+  const host = client();
+  sidecar.connect(2, "conn-hold", host);
+  sidecar.input(2, "conn-hold", { seq: 1, t: 1, buttons: 0x4000, sx: 80, sy: 0 }, host);
+  await sleep(900); // longer than the 500 ms contract default, shorter than the configured timeout
+  assert.deepEqual(decodeOSI1(fs.readFileSync(file)).ports[1], { kind: 3, enabled: 1, buttons: 0x4000, sx: 80, sy: 0 });
+  await sleep(500);
+  assert.deepEqual(decodeOSI1(fs.readFileSync(file)).ports[1], { kind: 3, enabled: 1, buttons: 0, sx: 0, sy: 0 });
+});
+
 test("replacement connection invalidates old ID and starts neutral", (t) => {
   const { file } = fixture(t);
   const sidecar = new Sidecar({ file }).start();
