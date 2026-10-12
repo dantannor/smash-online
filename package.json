@@ -11,7 +11,7 @@
     "test": "node --test --test-timeout=30000 $(find . -type f -name '*.test.js' -not -path './node_modules/*' -not -path './cloud/*' -print)",
     "cloud:build": "node cloud/build-assets.mjs",
     "cloud:deploy": "node cloud/build-assets.mjs && wrangler deploy --config cloud/wrangler.toml",
-    "test:cloud": "node --test --test-timeout=120000 cloud/worker.test.js"
+    "test:cloud": "node --test --test-concurrency=1 --test-timeout=120000 cloud/worker.test.js cloud/wake.test.js"
   },
   "devDependencies": {
     "playwright": "1.64.0",

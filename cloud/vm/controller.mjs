@@ -18,14 +18,16 @@ const TICK_MS = 2000;
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 
 function settings() {
-  const out = { bootGraceMin: 30, idleMin: 15, poweroff: true };
+  const out = { bootGraceMin: 30, idleMin: 15, poweroff: true, vmSecret: "", origin: "" };
   try {
     for (const line of readFileSync(ENV_FILE, "utf8").split("\n")) {
-      const m = line.match(/^\s*([A-Z_]+)=(.*)$/);
+      const m = line.match(/^\s*([A-Z_0-9]+)=(.*)$/);
       if (!m) continue;
       if (m[1] === "SMASH_BOOT_GRACE_MIN") out.bootGraceMin = Number(m[2]);
       if (m[1] === "SMASH_IDLE_MIN") out.idleMin = Number(m[2]);
       if (m[1] === "SMASH_IDLE_POWEROFF") out.poweroff = m[2] !== "0";
+      if (m[1] === "SMASH_VM_SECRET") out.vmSecret = m[2].trim();
+      if (m[1] === "SMASH_SIGNAL_ORIGIN") out.origin = m[2].trim();
     }
   } catch { /* defaults */ }
   return out;
@@ -88,6 +90,19 @@ async function publish(value) {
   } catch (e) { log("publish error", e.message); }
 }
 
+// Tell the Worker which room is live, so the permanent P1 / friend links resolve to it. Re-sent every 2 minutes.
+let lastRegistered = "", registeredAt = 0;
+async function register(cfg, status) {
+  if (!cfg.vmSecret || !cfg.origin || !status.ready) return;
+  const slots = status.links.map(l => ({ port: l.port, slotToken: new URL(l.url).searchParams.get("slot") })).filter(s => s.slotToken);
+  const body = JSON.stringify({ room: status.room, boot: status.boot, slots });
+  if (body === lastRegistered && Date.now() - registeredAt < 120000) return;
+  try {
+    const r = await fetch(`${cfg.origin}/api/vm/register`, { method: "POST", headers: { authorization: `Bearer ${cfg.vmSecret}`, "content-type": "application/json" }, body });
+    if (r.ok) { lastRegistered = body; registeredAt = Date.now(); log("registered room with the Worker"); } else log("worker registration failed", r.status);
+  } catch (e) { log("worker registration error", e.message); }
+}
+
 // --- main loop -------------------------------------------------------------------------------------------
 mkdirSync(STATE_DIR, { recursive: true });
 const myBoot = bootId();
@@ -99,9 +114,10 @@ async function tick() {
   let st;
   try { st = await evaluate(PAGE_STATE); } catch (e) { log("page not ready:", e.message); return; }
   const now = Date.now();
+  const gameUp = await gameWindowUp(); // also raises the game above Chrome: capture is the whole screen
   if (st.room !== lastRoom) { log("room", st.room); lastRoom = st.room; }
   if (!st.room && st.startEnabled && now - clickAt > 5000) { clickAt = now; log("creating room"); await evaluate("document.querySelector('#start').click()").catch(() => {}); }
-  else if (st.room && !st.captured && now - clickAt > 8000 && await gameWindowUp()) { clickAt = now; log("starting capture"); await evaluate("document.querySelector('#resume').click()").catch(() => {}); }
+  else if (st.room && !st.captured && now - clickAt > 8000 && gameUp) { clickAt = now; log("starting capture"); await evaluate("document.querySelector('#resume').click()").catch(() => {}); }
 
   const connected = Object.values(st.slots).filter(v => v === "connected" || v === "connecting").length;
   if (connected > 0) { sessionHappened = true; lastGuestAt = now; }
@@ -111,6 +127,7 @@ async function tick() {
   const status = { boot: bootEpoch(), bootId: myBoot, ready, room: st.room, captured: st.captured, guests: connected, links: ready || st.links.length ? st.links : [] };
   const text = JSON.stringify(status);
   if (text !== lastPublished) { lastPublished = text; await publish(status); }
+  await register(cfg, status);
 
   // Idle shutdown: before any session, a boot grace period; after one, idleMin without any guest.
   const idleFor = (now - lastGuestAt) / 60000;

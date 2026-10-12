@@ -11,6 +11,7 @@ const slotToken = params.get('slot');
 const keyState = new Set();
 const state = { connection: 'connecting', connected: false, slot: null, port: null, controller: 'Keyboard', ping: null, fps: null, error: null };
 let peer, ws, dataChannel, stream;
+let soundOn = false; // autoplay needs a user gesture: any first click or key press turns sound on
 let reconnectTimer, reconnectDelay = 500, generation = 0, sequence = 0;
 let virtualInput = null;
 let lastInput = { buttons: 0, sx: 0, sy: 0 };
@@ -141,10 +142,11 @@ function createPeer(ownGeneration) {
   peer.onicecandidate = ({ candidate }) => {
     if (candidate && ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'ice', candidate }));
   };
-  peer.ontrack = async ({ track, streams }) => {
-    stream = streams?.[0] || new MediaStream([track]);
-    video.srcObject = stream; video.playsInline = true; video.muted = true;
-    setReceiverLatency(track);
+  stream = new MediaStream(); // video and audio arrive as separate tracks; play them through one element
+  peer.ontrack = async ({ track }) => {
+    stream.addTrack(track);
+    video.srcObject = stream; video.playsInline = true; video.muted = !soundOn;
+    if (track.kind === 'video') setReceiverLatency(track);
     hint.hidden = true;
     try { await video.play(); } catch { hint.hidden = false; hint.textContent = 'Video is ready. Tap the screen to start playback.'; }
   };
@@ -194,7 +196,10 @@ window.addEventListener('gamepaddisconnected', () => sendInput(true));
 video.addEventListener('loadedmetadata', () => {
   if (video.videoWidth && video.videoHeight) document.querySelector('#screen').style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
 });
-document.querySelector('#sound').addEventListener('click', async () => { video.muted = false; try { await video.play(); } catch {} });
+const soundButton = document.querySelector('#sound');
+async function enableSound() { soundOn = true; video.muted = false; soundButton.textContent = 'Sound on'; try { await video.play(); } catch {} }
+soundButton.addEventListener('click', enableSound);
+for (const type of ['pointerdown', 'keydown']) window.addEventListener(type, () => { if (!soundOn) enableSound(); }, { once: true });
 document.querySelector('#fullscreen').addEventListener('click', async () => { const target = document.querySelector('#screen'); try { if (!document.fullscreenElement) await target.requestFullscreen(); else await document.exitFullscreen(); } catch {} });
 setInterval(() => sendInput(true), 1000 / 60);
 window.__smashGuest = { state, stats: async () => ({ ...state, rtcStats: peer ? [...(await peer.getStats()).values()] : [] }), get lastInput() { return { ...lastInput }; }, setVirtualInput };
