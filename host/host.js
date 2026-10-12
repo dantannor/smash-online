@@ -18,8 +18,27 @@ const startButton = document.querySelector("#start");
 const resumeButton = document.querySelector("#resume");
 const sourceSelect = document.querySelector("#source");
 const peers = new Map();
+const creatingPeers = new Map();
 // ?p1guest=1 (headless/cloud host): P1 is a guest link like P2-P4 and "Play P1 here" starts off.
 const p1Guest = new URLSearchParams(location.search).get("p1guest") === "1";
+// Optional cloud-host tuning (query string): audio=1 adds the game's audio (PulseAudio monitor via getUserMedia) to every guest,
+// maxkbps caps the video sender, startkbps/minkbps seed the congestion controller so it does not ramp up from a low bitrate.
+const tuning = (() => { const q = new URLSearchParams(location.search); const n = name => Number(q.get(name)) || 0; return { audio: q.get("audio") === "1", maxKbps: n("maxkbps") || 6000, startKbps: n("startkbps"), minKbps: n("minkbps") }; })();
+let gameAudioPromise = null;
+function gameAudio() {
+  gameAudioPromise ??= navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } })
+    .catch(error => { status(`Game audio unavailable: ${error.message}`, true); return null; });
+  return gameAudioPromise;
+}
+function tuneAnswer(sdp) {
+  if (!tuning.startKbps) return sdp;
+  const bitrates = `x-google-start-bitrate=${tuning.startKbps};x-google-max-bitrate=${tuning.maxKbps}${tuning.minKbps ? `;x-google-min-bitrate=${tuning.minKbps}` : ""}`;
+  let inVideo = false;
+  return sdp.split("\r\n").map(line => {
+    if (line.startsWith("m=")) inVideo = line.startsWith("m=video");
+    return inVideo && line.startsWith("a=fmtp:") && !line.includes("apt=") ? `${line};${bitrates}` : line;
+  }).join("\r\n");
+}
 const statuses = new Map((p1Guest ? [1, 2, 3, 4] : [2, 3, 4]).map(port => [port, { status: "empty", ping: null }]));
 let roomInfo = null;
 let stream = null;
@@ -141,24 +160,37 @@ async function handleSignal(message) {
     if (![1, 2, 3, 4].includes(port) || !message.connectionId) return;
     const existing = peers.get(port);
     if (existing?.connectionId === message.connectionId && !["failed", "closed", "disconnected"].includes(existing.pc.connectionState)) return;
-    closePeer(port, false);
-    updateSlotStatus(port, "connecting");
-    const peer = await createPeer(port, message.connectionId);
-    peers.set(port, peer);
-    const offer = await peer.pc.createOffer();
-    await peer.pc.setLocalDescription(offer);
-    sendSignal({ type: "offer", port, sdp: peer.pc.localDescription.sdp });
-    peer.offerAt = performance.now();
+    // createPeer awaits (ICE servers, audio device); a replayed slot:connected for the same connection must not start a second peer.
+    if (creatingPeers.get(port) === message.connectionId) return;
+    creatingPeers.set(port, message.connectionId);
+    try {
+      closePeer(port, false);
+      updateSlotStatus(port, "connecting");
+      const peer = await createPeer(port, message.connectionId);
+      if (creatingPeers.get(port) !== message.connectionId) { try { peer.pc.close(); } catch { /* superseded */ } clearInterval(peer.statsTimer); return; }
+      peers.set(port, peer);
+      const offer = await peer.pc.createOffer();
+      await peer.pc.setLocalDescription(offer);
+      sendSignal({ type: "offer", port, sdp: peer.pc.localDescription.sdp });
+      peer.offerAt = performance.now();
+    } finally { if (creatingPeers.get(port) === message.connectionId) creatingPeers.delete(port); }
   } else if (message.type === "slot:disconnected") {
     const peer = peers.get(Number(message.port));
     if (peer && (!message.connectionId || message.connectionId === peer.connectionId)) closePeer(Number(message.port));
   } else if (message.type === "answer") {
     const peer = peers.get(Number(message.port));
     if (!peer) return;
-    if (peer.pc.signalingState === "have-local-offer") await peer.pc.setRemoteDescription({ type: "answer", sdp: message.sdp });
+    if (peer.pc.signalingState === "have-local-offer") {
+      await peer.pc.setRemoteDescription({ type: "answer", sdp: tuneAnswer(message.sdp) });
+      // The guest's host/srflx candidates arrive right behind its answer; they were dropped (forcing the TURN relay) when they beat it.
+      for (const candidate of peer.pendingIce.splice(0)) await peer.pc.addIceCandidate(candidate).catch(() => {});
+    }
   } else if (message.type === "ice") {
     const peer = peers.get(Number(message.port));
-    if (peer && message.candidate) await peer.pc.addIceCandidate(message.candidate).catch(() => {});
+    if (peer && message.candidate) {
+      if (peer.pc.remoteDescription) await peer.pc.addIceCandidate(message.candidate).catch(() => {});
+      else peer.pendingIce.push(message.candidate);
+    }
   } else if (message.type === "error") {
     if (message.code === "ROOM_NOT_FOUND") {
       sessionStorage.removeItem(STORAGE_KEY);
@@ -172,8 +204,9 @@ async function createPeer(port, connectionId) {
   const pc = new RTCPeerConnection({ iceServers: await fetchIceServers() });
   const videoTrack = stream?.getVideoTracks()[0] || null;
   const videoTransceiver = pc.addTransceiver(videoTrack || "video", { direction: "sendonly" });
-  const peer = { pc, connectionId, channel: null, statsTimer: null, offerAt: 0, lastBytes: 0, lastStatsAt: 0, videoSender: videoTransceiver.sender };
+  const peer = { pc, connectionId, pendingIce: [], channel: null, statsTimer: null, offerAt: 0, lastBytes: 0, lastStatsAt: 0, videoSender: videoTransceiver.sender };
   for (const track of stream?.getAudioTracks() || []) pc.addTrack(track, stream);
+  if (tuning.audio) { const audio = await gameAudio(); if (audio) for (const track of audio.getAudioTracks()) pc.addTrack(track, audio); }
   const videoCodec = RTCRtpSender.getCapabilities?.("video")?.codecs?.filter(codec => /H264/i.test(codec.mimeType)) || [];
   if (videoCodec.length && typeof RTCRtpTransceiver !== "undefined" && RTCRtpTransceiver.prototype.setCodecPreferences) {
     videoTransceiver.setCodecPreferences([...videoCodec, ...RTCRtpSender.getCapabilities("video").codecs.filter(codec => !/H264/i.test(codec.mimeType))]);
@@ -183,7 +216,7 @@ async function createPeer(port, connectionId) {
     try {
       const params = sender.getParameters();
       params.encodings = params.encodings?.length ? params.encodings : [{}];
-      params.encodings[0].maxBitrate = 6_000_000;
+      params.encodings[0].maxBitrate = tuning.maxKbps * 1000;
       params.encodings[0].maxFramerate = 60;
       params.encodings[0].priority = "high";
       params.degradationPreference = "maintain-framerate";

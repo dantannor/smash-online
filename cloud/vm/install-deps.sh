@@ -7,7 +7,7 @@ apt-get install -y build-essential cmake ninja-build git python3 python3-venv py
   libsdl2-dev libglew-dev libglu1-mesa-dev libgl1-mesa-dri mesa-utils libx11-dev libxext-dev libpng-dev zlib1g-dev \
   libtinyxml2-dev nlohmann-json3-dev libspdlog-dev libzip-dev zipcmp zipmerge ziptool libbz2-dev libogg-dev libvorbis-dev \
   xvfb x11-utils xdotool imagemagick libarchive-dev libcurl4-openssl-dev libopus-dev libglfw3-dev libhidapi-dev libusb-1.0-0-dev \
-  libfreetype-dev libfmt-dev lld clang fonts-liberation
+  libfreetype-dev libfmt-dev lld clang fonts-liberation pulseaudio pulseaudio-utils
 if ! command -v google-chrome-stable >/dev/null; then
   curl -fsSL -o /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
   apt-get install -y /tmp/chrome.deb; rm -f /tmp/chrome.deb

@@ -1,5 +1,7 @@
 import { Room } from "./room.js";
-export { Room };
+import { Registry } from "./registry.js";
+import { handleWake } from "./wake.js";
+export { Room, Registry };
 
 const PORTS = [2, 3, 4];
 const PORTS_WITH_P1 = [1, ...PORTS]; // opt-in: a room created with {p1Guest:true} also gets a P1 guest link
@@ -49,6 +51,8 @@ export default {
 };
 
 async function route(request, env, url) {
+    const wake = await handleWake(request, env, url);
+    if (wake) return wake;
     if (request.method === "GET" && url.pathname === "/healthz") return json(200, { status: "ok" });
     if (request.method === "GET" && url.pathname === "/api/ice") return json(200, { iceServers: await iceServers(env) });
     if (request.method === "POST" && url.pathname === "/api/rooms") {

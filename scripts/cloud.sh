@@ -3,7 +3,8 @@
 #   scripts/cloud.sh up       create/start the VM, wait until a room exists, print the P1-P4 links
 #   scripts/cloud.sh down     stop the VM (the disk is kept)
 #   scripts/cloud.sh status   VM state, services, guests, idle-shutdown settings
-#   scripts/cloud.sh links    print the links of the running room (from GCE guest attributes)
+#   scripts/cloud.sh links    print the permanent P1 and friend URLs (links --live: the current room's links)
+#   scripts/cloud.sh secrets <gcp-key.json>   generate the permanent-link secrets and store them as Worker secrets
 #   scripts/cloud.sh sync     copy this checkout to the VM and restart the services
 #   scripts/cloud.sh newroom  restart the host page (new room, new links)
 #   scripts/cloud.sh idle <bootGraceMin> <idleMin>   change the idle-shutdown timeouts
@@ -20,6 +21,8 @@ MACHINE="${SMASH_GCP_MACHINE:-c2d-highcpu-8}"
 ROM="${SMASH_ROM_PATH:-$HOME/Downloads/Super Smash Bros. (USA).z64}"
 KEY="${SMASH_CLOUD_KEY:-$CONF/gcp_ed25519}"
 SSH_CONF="$CONF/ssh_config"
+PERM="$CONF/permanent.env"   # P1_SECRET / FRIEND_SECRET / VM_SECRET, never committed
+WORKER_ORIGIN="${SMASH_WORKER_ORIGIN:-https://smash-online.reddit-service-site.workers.dev}"
 GCLOUD="${SMASH_GCLOUD:-$(command -v gcloud || ls /tmp/gcloud-sdk/google-cloud-sdk/bin/gcloud 2>/dev/null || true)}"
 [[ -n "$GCLOUD" ]] || { echo "gcloud not found (set SMASH_GCLOUD)" >&2; exit 2; }
 gc() { "$GCLOUD" --project "$PROJECT" "$@"; }
@@ -44,7 +47,11 @@ ensure_firewall() { # SSH-over-TLS on 443 from this machine's /32 only; IAP rang
   gc compute firewall-rules describe smash-allow-iap-ssh >/dev/null 2>&1 || \
     gc compute firewall-rules create smash-allow-iap-ssh --network default --direction INGRESS --allow tcp:22 \
       --source-ranges 35.235.240.0/20 --quiet >/dev/null
-  say "firewall: 443 open to $ip/32 only"
+  # WebRTC media straight to the VM (Chrome is limited to this range by policy); TURN stays the fallback
+  gc compute firewall-rules describe smash-allow-webrtc-udp >/dev/null 2>&1 || \
+    gc compute firewall-rules create smash-allow-webrtc-udp --network default --direction INGRESS --allow udp:50000-50099 \
+      --source-ranges 0.0.0.0/0 --target-tags smash-online --quiet >/dev/null
+  say "firewall: 443 open to $ip/32 only, udp 50000-50099 open for WebRTC"
 }
 write_ssh_config() { # the IP changes on every start, the host key is pinned under the alias
   cat > "$SSH_CONF" <<C
@@ -94,6 +101,10 @@ provision() { # first run: dependencies, ROM, game build, roster, services (take
 }
 need_provision() { ! vssh 'test -x ~/Projects/smash-online-build/src/BattleShip/build-us/BattleShip && test -f /etc/systemd/system/smash-ctl.service' >/dev/null 2>&1; }
 
+push_vm_secret() { # lets the VM register its room with the Worker (Bearer VM_SECRET); stdin keeps it off the command line
+  [[ -r "$PERM" ]] || return 0
+  ( . "$PERM"; printf '%s' "$VM_SECRET" ) | vssh 'read -r s; sudo sed -i "s|^SMASH_VM_SECRET=.*|SMASH_VM_SECRET=$s|" /etc/smash-online.env; sudo chgrp smash /etc/smash-online.env; sudo chmod 640 /etc/smash-online.env; sudo systemctl restart smash-ctl' >/dev/null 2>&1 || true
+}
 status_json() { # prints the controller status JSON, or nothing
   gci get-guest-attributes "$VM" --query-path=smash/status --format='value(value)' 2>/dev/null || true
 }
@@ -115,6 +126,7 @@ cmd_up() {
   local ip; ip="$(vm_ip)"; write_ssh_config "$ip"; say "VM at $ip; waiting for SSH over TLS"
   wait_ssh
   if need_provision; then provision; fi
+  push_vm_secret
   local boot_floor; boot_floor="$(gci describe "$VM" --format='value(lastStartTimestamp)' | node -e 'console.log(Math.floor(new Date(require("fs").readFileSync(0,"utf8").trim()).getTime()/1000))')"
   say "waiting for a room with live capture"
   local end=$((SECONDS + 420)) json=""
@@ -126,10 +138,32 @@ cmd_up() {
   [[ -n "$json" ]] || { echo "services did not become healthy; try: scripts/cloud.sh status" >&2; exit 1; }
   say "up in $((SECONDS - t0)) s"
   echo "$json" | print_links
+  [[ -r "$PERM" ]] && { echo "Permanent links:"; cmd_links; }
   echo "Idle shutdown: see 'scripts/cloud.sh status'. Stop billing now with: scripts/cloud.sh down"
 }
 cmd_down() { say "stopping $VM"; gci stop "$VM" --quiet >/dev/null; say "stopped (disk kept)"; }
-cmd_links() { local j; j="$(status_json)"; [[ -n "$j" ]] || { echo "no links (is the VM up? scripts/cloud.sh up)" >&2; exit 1; }; echo "$j" | print_links; }
+cmd_secrets() {
+  local key="${1:-}"; [[ -f "$key" ]] || { echo "usage: cloud.sh secrets <gcp-service-account-key.json>" >&2; exit 64; }
+  if [[ ! -f "$PERM" ]]; then
+    local g; g() { node -e 'console.log(require("crypto").randomBytes(32).toString("base64url"))'; }
+    ( umask 077; printf 'P1_SECRET=%s\nFRIEND_SECRET=%s\nVM_SECRET=%s\n' "$(g)" "$(g)" "$(g)" > "$PERM" )
+    say "generated $PERM"
+  fi
+  ( . "$PERM"
+    cd "$ROOT"
+    for name in P1_SECRET FRIEND_SECRET VM_SECRET; do printf '%s' "${!name}" | npx wrangler secret put "$name" --config cloud/wrangler.toml >/dev/null; done
+    npx wrangler secret put GCP_SA_JSON --config cloud/wrangler.toml < "$key" >/dev/null )
+  say "Worker secrets stored (P1_SECRET, FRIEND_SECRET, VM_SECRET, GCP_SA_JSON)"
+  [[ "$(vm_status)" == RUNNING ]] && { write_ssh_config "$(vm_ip)"; push_vm_secret; }
+  true
+}
+cmd_links() {
+  if [[ "${1:-}" != --live ]]; then
+    [[ -r "$PERM" ]] || { echo "no permanent links yet: run scripts/cloud.sh secrets <gcp-key.json>" >&2; exit 1; }
+    ( . "$PERM"; echo "P1 (Daniel, wakes the VM): $WORKER_ORIGIN/go/$P1_SECRET"; for n in 2 3 4; do echo "P$n (friends, never wake the VM): $WORKER_ORIGIN/p/$FRIEND_SECRET/$n"; done )
+    return
+  fi
+  local j; j="$(status_json)"; [[ -n "$j" ]] || { echo "no links (is the VM up? scripts/cloud.sh up)" >&2; exit 1; }; echo "$j" | print_links; }
 cmd_status() {
   local st; st="$(vm_status)"; echo "VM $VM: $st"
   [[ "$st" == RUNNING ]] || exit 0
@@ -141,8 +175,9 @@ case "${1:-}" in
   up) cmd_up ;;
   down) cmd_down ;;
   status) cmd_status ;;
-  links) cmd_links ;;
-  sync) with_vm; sync_repo; vssh 'sudo ~/smash-online/cloud/vm/install-services.sh' ;;
+  links) shift; cmd_links "$@" ;;
+  secrets) shift; cmd_secrets "$@" ;;
+  sync) with_vm; sync_repo; vssh 'sudo ~/smash-online/cloud/vm/install-services.sh'; push_vm_secret ;;
   newroom) with_vm; vssh 'sudo systemctl restart smash-chrome' ;;
   idle) with_vm; [[ "${2:-}" =~ ^[0-9]+$ && "${3:-}" =~ ^[0-9]+$ ]] || { echo "usage: cloud.sh idle <bootGraceMin> <idleMin>" >&2; exit 64; }
         vssh "sudo sed -i -e 's/^SMASH_BOOT_GRACE_MIN=.*/SMASH_BOOT_GRACE_MIN=$2/' -e 's/^SMASH_IDLE_MIN=.*/SMASH_IDLE_MIN=$3/' /etc/smash-online.env && grep -E '^SMASH_(BOOT|IDLE)' /etc/smash-online.env" ;;
