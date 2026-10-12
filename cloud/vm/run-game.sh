@@ -14,6 +14,9 @@ if [[ "${SMASH_ROSTER:-custom}" != vanilla && -f "$ROSTER_DIR/roster.txt" ]]; th
   ln -sfn "$ROSTER_DIR/characters" "$GAME_DIR/characters"
   export SSB64_ROSTER_FILE="$ROSTER_DIR/roster.txt" SSB64_ROSTER_PAGE=1
 fi
+# page jumps for the character select screen: the sidecar writes "<seq> <page>" here (see roster-page.patch)
+export SSB64_ROSTER_PAGE_FILE="$(dirname "$OPENSMASH_LAUNCHER_INPUT")/roster-page"
+[[ -f "$SSB64_ROSTER_PAGE_FILE" ]] || echo "0 1" > "$SSB64_ROSTER_PAGE_FILE"
 export SMASH_AUDIO_BACKEND=sdl
 export SMASH_WINDOW_W="${SMASH_VIDEO_W:-640}" SMASH_WINDOW_H="${SMASH_VIDEO_H:-480}"
 # the game writes its config on first run; from the next start on, force the small windowed layout

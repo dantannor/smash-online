@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { createReadStream, existsSync, statSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +12,7 @@ const DEFAULT_PORTS = [2, 3, 4];
 const STUN = ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302"];
 const MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".ico": "image/x-icon", ".wasm": "application/wasm", ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf", ".otf": "font/otf", ".mp4": "video/mp4", ".webm": "video/webm", ".txt": "text/plain; charset=utf-8" };
 const ROM_EXT = new Set([".n64", ".z64", ".v64", ".o2r", ".otr"]);
+const ORIGINALS = ["Luigi", "Mario", "Donkey Kong", "Link", "Samus", "Captain Falcon", "Ness", "Yoshi", "Kirby", "Fox", "Pikachu", "Jigglypuff"]; // character select page 0, left to right, top row first
 const DEBUG_WS = process.env.SMASH_DEBUG === "1";
 const hash = (token) => createHash("sha256").update(token).digest();
 const token = () => randomBytes(32).toString("base64url");
@@ -30,6 +31,11 @@ export function createApplication({ now = Date.now } = {}) {
   const server = createHttpServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
     if (req.method === "GET" && url.pathname === "/healthz") return json(res, 200, { status: "ok" });
+    if (req.method === "GET" && url.pathname === "/roster.json") { // the cloud host page forwards this list to guests for the fighter finder
+      let custom = [];
+      try { custom = JSON.parse(readFileSync(process.env.SMASH_ROSTER_JSON || "", "utf8")).characters.map((c) => ({ name: c.name, base: c.base, page: c.page })); } catch { /* no staged roster: originals only */ }
+      return json(res, 200, { originals: ORIGINALS, custom });
+    }
     if (req.method === "GET" && url.pathname === "/api/ice") return json(res, 200, { iceServers: STUN.map((urls) => ({ urls })) });
     if (req.method === "GET" && url.pathname === "/host" && process.env.SMASH_SIGNAL_ORIGIN && !url.searchParams.has("signal")) {
       url.searchParams.set("signal", process.env.SMASH_SIGNAL_ORIGIN);

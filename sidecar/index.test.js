@@ -221,3 +221,21 @@ test("SIGTERM exits promptly with a neutral final packet while a host websocket 
     assert.deepEqual(p, { kind: KINDS.DISCONNECTED, enabled: 0, buttons: 0, sx: 0, sy: 0 });
   }
 });
+
+test("roster:page writes a new '<seq> <page>' request for the game and validates the page", (t) => {
+  const { file } = fixture(t);
+  const pageFile = file + ".page";
+  const sidecar = new Sidecar({ file, rosterPageFile: pageFile }).start();
+  t.after(() => sidecar.close());
+  const host = client();
+  sidecar.requestRosterPage(7, host);
+  const [seq, page] = fs.readFileSync(pageFile, "utf8").trim().split(" ").map(Number);
+  assert.equal(page, 7); assert.ok(seq > 0);
+  sidecar.requestRosterPage(-1, host); sidecar.requestRosterPage(1.5, host);
+  assert.equal(host.messages.filter((m) => m.code === "invalid_page").length, 2);
+  assert.equal(fs.readFileSync(pageFile, "utf8").trim().split(" ")[1], "7");
+  const bare = new Sidecar({ file: file + "2" }).start();
+  t.after(() => bare.close());
+  bare.requestRosterPage(1, host);
+  assert.ok(host.messages.some((m) => m.code === "roster_unavailable"));
+});

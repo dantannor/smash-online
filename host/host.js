@@ -18,6 +18,29 @@ const startButton = document.querySelector("#start");
 const resumeButton = document.querySelector("#resume");
 const sourceSelect = document.querySelector("#source");
 const peers = new Map();
+// Fighter finder (cloud host): guests ask for a character select page over a reliable "meta" data channel; the sidecar passes it to the game.
+let rosterList = null;
+let lastRosterPage = 1;
+async function loadRoster() {
+  rosterList ??= fetch("/roster.json", { cache: "no-store" }).then(r => r.json()).catch(() => ({ originals: [], custom: [] }));
+  return rosterList;
+}
+async function sendRoster(channel) {
+  const { originals, custom } = await loadRoster();
+  const send = value => { if (channel.readyState === "open") channel.send(JSON.stringify(value)); };
+  send({ type: "roster:begin", originals, total: custom.length, pages: 1 + Math.ceil(custom.length / 12), page: lastRosterPage });
+  for (let i = 0; i < custom.length; i += 100) send({ type: "roster:chunk", offset: i, items: custom.slice(i, i + 100).map(c => [c.name, c.base]) });
+  send({ type: "roster:end" });
+}
+function handleMeta(port, raw) {
+  let message;
+  try { message = JSON.parse(raw); } catch { return; }
+  if (message?.type === "roster:page" && Number.isInteger(message.page) && message.page >= 0 && message.page < 4096) {
+    lastRosterPage = message.page;
+    sendSidecar({ type: "roster:page", page: message.page });
+    for (const peer of peers.values()) if (peer.meta?.readyState === "open") peer.meta.send(JSON.stringify({ type: "roster:page", page: message.page, by: port }));
+  }
+}
 const creatingPeers = new Map();
 // ?p1guest=1 (headless/cloud host): P1 is a guest link like P2-P4 and "Play P1 here" starts off.
 const p1Guest = new URLSearchParams(location.search).get("p1guest") === "1";
@@ -26,8 +49,12 @@ const p1Guest = new URLSearchParams(location.search).get("p1guest") === "1";
 const tuning = (() => { const q = new URLSearchParams(location.search); const n = name => Number(q.get(name)) || 0; return { audio: q.get("audio") === "1", maxKbps: n("maxkbps") || 6000, startKbps: n("startkbps"), minKbps: n("minkbps") }; })();
 let gameAudioPromise = null;
 function gameAudio() {
-  gameAudioPromise ??= navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } })
-    .catch(error => { status(`Game audio unavailable: ${error.message}`, true); return null; });
+  // Never let the audio device hold up a guest's offer: give up after 4 s (no audio for that guest) and try again for the next one.
+  gameAudioPromise ??= Promise.race([
+    navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } })
+      .catch(error => { status(`Game audio unavailable: ${error.message}`, true); return null; }),
+    new Promise(resolve => setTimeout(() => resolve(null), 4000)),
+  ]).then(stream => { if (!stream) gameAudioPromise = null; return stream; });
   return gameAudioPromise;
 }
 function tuneAnswer(sdp) {
@@ -196,7 +223,7 @@ async function handleSignal(message) {
       sessionStorage.removeItem(STORAGE_KEY);
       roomInfo = null;
       status("Room expired. Reload this page to create a new room.", true);
-    } else status(message.message || message.code || "Signaling error", true);
+    } else if (message.code !== "INVALID_OPERATION") status(message.message || message.code || "Signaling error", true); // INVALID_OPERATION answers the liveness probe
   }
 }
 
@@ -223,6 +250,10 @@ async function createPeer(port, connectionId) {
       await sender.setParameters(params);
     } catch { /* Browser support varies. */ }
   }
+  const meta = pc.createDataChannel("meta", { ordered: true });
+  peer.meta = meta;
+  meta.addEventListener("open", () => sendRoster(meta));
+  meta.addEventListener("message", event => handleMeta(port, typeof event.data === "string" ? event.data : ""));
   const channel = pc.createDataChannel("input", { ordered: false, maxRetransmits: 0 });
   peer.channel = channel;
   channel.addEventListener("open", () => {
@@ -542,6 +573,17 @@ try {
   if (saved?.room && saved?.roomToken && Array.isArray(saved.slots)) reattachRoom(saved);
 } catch { sessionStorage.removeItem(STORAGE_KEY); }
 
+// After a VM suspend/resume the signaling socket can look open and be dead. The Worker answers any unknown message with an
+// INVALID_OPERATION error, so a reply within 1.5 s proves the socket (and the room behind it) is alive.
+window.__smashSignalProbe = () => new Promise(resolve => {
+  if (signaling?.readyState !== WebSocket.OPEN) return resolve(false);
+  const socket = signaling;
+  const done = value => { clearTimeout(timer); socket.removeEventListener("message", onMessage); resolve(value); };
+  const onMessage = event => { try { if (JSON.parse(event.data).code === "INVALID_OPERATION") done(true); } catch { /* not ours */ } };
+  const timer = setTimeout(() => done(false), 1500);
+  socket.addEventListener("message", onMessage);
+  sendSignal({ type: "probe" });
+});
 window.__smashHostP1 = () => ({ connected: p1Connected, enabled: p1Toggle.checked, last: lastGamepadState });
 window.__smashHostStats = () => ({
   room: roomInfo?.room || null,

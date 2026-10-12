@@ -11,6 +11,8 @@ const room = params.get('room');
 const slotToken = params.get('slot');
 const keyState = new Set();
 const state = { connection: 'connecting', connected: false, slot: null, port: null, controller: 'Keyboard', ping: null, fps: null, error: null };
+let offerWatchdog;
+let metaChannel = null; // reliable side channel from the host (fighter finder)
 let peer, ws, dataChannel, videoStream, audioStream;
 let soundOn = false; // the video is always muted (so it autoplays everywhere); a user gesture only unlocks the separate audio element
 let reconnectTimer, reconnectDelay = 500, generation = 0, sequence = 0;
@@ -67,6 +69,7 @@ function closeConnection() {
   dataChannel = null;
   if (peer) { peer.onicecandidate = peer.ontrack = peer.ondatachannel = peer.onconnectionstatechange = null; try { peer.close(); } catch {} }
   peer = null;
+  metaChannel = null;
   if (ws) { ws.onclose = ws.onerror = ws.onmessage = null; try { ws.close(); } catch {} }
   ws = null;
 }
@@ -108,7 +111,14 @@ async function connect() {
     wsUrl.searchParams.set('room', room); wsUrl.searchParams.set('role', 'guest');
     wsUrl.searchParams.set('token', slotToken); wsUrl.searchParams.set('port', String(port));
     ws = new WebSocket(wsUrl);
-    ws.onopen = () => { if (ownGeneration === generation) setState('Signaling connected'); };
+    ws.onopen = () => {
+      if (ownGeneration !== generation) return;
+      setState('Signaling connected');
+      // The host answers a connected slot with an offer within a second or two; if it never does (it was busy starting up, or lost
+      // the slot:connected), reconnect so the host sees this slot connect again instead of waiting on it forever.
+      clearTimeout(offerWatchdog);
+      offerWatchdog = setTimeout(() => { if (ownGeneration === generation && !state.connected) scheduleReconnect('no offer from the host'); }, 12000);
+    };
     ws.onmessage = (event) => { if (ownGeneration === generation) void handleSignal(event.data, ownGeneration); };
     ws.onerror = () => { if (ownGeneration === generation) scheduleReconnect('signaling error'); };
     ws.onclose = (event) => { if (ownGeneration !== generation) return; if (event.code === 4001) stopForReplacement(); else scheduleReconnect('signaling closed'); };
@@ -168,6 +178,7 @@ function createPeer(ownGeneration) {
     ensurePlaying();
   };
   peer.ondatachannel = ({ channel }) => {
+    if (channel.label === 'meta') { attachMeta(channel); return; }
     if (channel.label !== 'input') { channel.close(); return; }
     dataChannel = channel;
     channel.onopen = () => { if (ownGeneration === generation) { reconnectDelay = 500; setState('Connected'); sendInput(true); } };
@@ -207,11 +218,12 @@ async function readStats() {
 }
 const GAME_CODES = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space']);
 window.addEventListener('keydown', event => {
+  if (typingTarget(event)) return; // the fighter search box must not drive the game
   if (event.metaKey || event.ctrlKey || event.altKey) return; // browser shortcuts: their keyups never arrive
   if (GAME_CODES.has(event.code)) event.preventDefault();
   keyState.add(event.code); sendInput();
 });
-window.addEventListener('keyup', event => { keyState.delete(event.code); sendInput(); });
+window.addEventListener('keyup', event => { if (typingTarget(event)) return; keyState.delete(event.code); sendInput(); });
 document.addEventListener('visibilitychange', () => { if (document.hidden) { keyState.clear(); sendInput(true); } else void ensurePlaying(); });
 window.addEventListener('blur', () => { keyState.clear(); sendInput(true); });
 window.addEventListener('gamepadconnected', () => sendInput(true));
@@ -237,10 +249,63 @@ async function toggleFullscreen() {
 }
 fullscreenButton.addEventListener('click', () => { void ensurePlaying(); toggleFullscreen(); });
 for (const type of ['fullscreenchange', 'webkitfullscreenchange']) document.addEventListener(type, () => { fullscreenButton.textContent = fullscreenElement() ? 'Exit fullscreen (Esc)' : 'Fullscreen (F)'; });
-window.addEventListener('keydown', event => { if (event.code === 'KeyF' && !event.repeat && !event.metaKey && !event.ctrlKey && !event.altKey) toggleFullscreen(); });
+window.addEventListener('keydown', event => { if (event.code === 'KeyF' && !typingTarget(event) && !event.repeat && !event.metaKey && !event.ctrlKey && !event.altKey) toggleFullscreen(); });
 setInterval(() => sendInput(true), 1000 / 60);
 window.__smashGuest = { state, ensurePlaying, stats: async () => ({ ...state, rtcStats: peer ? [...(await peer.getStats()).values()] : [] }), get lastInput() { return { ...lastInput }; }, setVirtualInput };
 if (params.get('fakeInput') === 'script') {
   let tick = 0; setInterval(() => { tick++; setVirtualInput({ buttons: tick % 2 ? 0x8000 : 0, sx: tick % 2 ? 30 : -30, sy: 0 }); }, 500);
 }
 connect();
+
+// ---- fighter finder -------------------------------------------------------------------------------------------
+// The host sends the roster over a reliable "meta" channel; picking a result asks the host to flip the game's
+// character select to that page (the game has 12 original tiles on page 0 and 12 custom fighters per page after).
+const finder = { originals: [], custom: [], pages: 1, page: 1 };
+const finderEl = document.querySelector('#finder');
+const finderResults = document.querySelector('#finder-results');
+const finderSearch = document.querySelector('#finder-search');
+const finderPage = document.querySelector('#finder-page');
+function typingTarget(event) { return event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement; }
+function attachMeta(channel) {
+  metaChannel = channel;
+  channel.onmessage = ({ data }) => {
+    let message;
+    try { message = JSON.parse(data); } catch { return; }
+    if (message.type === 'roster:begin') { finder.originals = message.originals || []; finder.custom = []; finder.pages = message.pages || 1; finder.page = message.page ?? 1; }
+    else if (message.type === 'roster:chunk') { for (const item of message.items || []) finder.custom.push(item); }
+    else if (message.type === 'roster:page') finder.page = message.page;
+    renderFinder();
+  };
+}
+function requestPage(page) {
+  const target = ((page % finder.pages) + finder.pages) % finder.pages;
+  finder.page = target;
+  if (metaChannel?.readyState === 'open') metaChannel.send(JSON.stringify({ type: 'roster:page', page: target }));
+  renderFinder();
+}
+function renderFinder() {
+  finderPage.textContent = `Page ${finder.page} of ${finder.pages - 1}${finder.page === 0 ? ' (originals)' : ''}`;
+  const query = finderSearch.value.trim().toLowerCase();
+  const rows = [];
+  finder.originals.forEach(name => rows.push({ name, page: 0, note: 'original' }));
+  finder.custom.forEach(([name, base], index) => rows.push({ name, page: 1 + Math.floor(index / 12), note: `plays like ${base}` }));
+  const matches = (query ? rows.filter(row => row.name.toLowerCase().includes(query)) : rows.filter(row => row.page === finder.page)).slice(0, 80);
+  finderResults.replaceChildren(...matches.map(row => {
+    const item = document.createElement('li');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = `${row.name} · page ${row.page} · ${row.note}`;
+    button.addEventListener('click', () => requestPage(row.page));
+    item.append(button);
+    return item;
+  }));
+  if (!matches.length) { const item = document.createElement('li'); item.textContent = finder.custom.length || finder.originals.length ? 'No fighter matches.' : 'Fighter list not available yet.'; finderResults.append(item); }
+}
+document.querySelector('#fighters').addEventListener('click', () => { finderEl.hidden = !finderEl.hidden; if (!finderEl.hidden) { renderFinder(); finderSearch.focus(); } });
+document.querySelector('#finder-close').addEventListener('click', () => { finderEl.hidden = true; });
+document.querySelector('#page-prev').addEventListener('click', () => requestPage(finder.page - 1));
+document.querySelector('#page-next').addEventListener('click', () => requestPage(finder.page + 1));
+document.querySelector('#page-originals').addEventListener('click', () => requestPage(0));
+document.querySelector('#page-go').addEventListener('click', () => { const value = Number(document.querySelector('#page-input').value); if (Number.isInteger(value)) requestPage(value); });
+finderSearch.addEventListener('input', renderFinder);
+finderSearch.addEventListener('keydown', event => { if (event.key === 'Escape') { finderEl.hidden = true; finderSearch.blur(); } });

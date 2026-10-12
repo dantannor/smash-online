@@ -14,11 +14,11 @@ const ENV_FILE = process.env.SMASH_ENV_FILE || "/etc/smash-online.env";
 const STATE_DIR = process.env.SMASH_STATE_DIR || join(homedir(), ".smash-online");
 const CDP = process.env.SMASH_CDP || "http://127.0.0.1:9222";
 const GAME_WINDOW = process.env.SMASH_GAME_WINDOW_NAME || "BattleShip";
-const TICK_MS = 2000;
+const TICK_MS = 1000;
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 
 function settings() {
-  const out = { bootGraceMin: 30, idleMin: 15, poweroff: true, vmSecret: "", origin: "" };
+  const out = { bootGraceMin: 30, idleMin: 15, poweroff: true, vmSecret: "", origin: "", idleAction: "suspend" };
   try {
     for (const line of readFileSync(ENV_FILE, "utf8").split("\n")) {
       const m = line.match(/^\s*([A-Z_0-9]+)=(.*)$/);
@@ -27,6 +27,7 @@ function settings() {
       if (m[1] === "SMASH_IDLE_MIN") out.idleMin = Number(m[2]);
       if (m[1] === "SMASH_IDLE_POWEROFF") out.poweroff = m[2] !== "0";
       if (m[1] === "SMASH_VM_SECRET") out.vmSecret = m[2].trim();
+      if (m[1] === "SMASH_IDLE_ACTION") out.idleAction = m[2].trim();
       if (m[1] === "SMASH_SIGNAL_ORIGIN") out.origin = m[2].trim();
     }
   } catch { /* defaults */ }
@@ -90,13 +91,13 @@ async function publish(value) {
   } catch (e) { log("publish error", e.message); }
 }
 
-// Tell the Worker which room is live, so the permanent P1 / friend links resolve to it. Re-sent every 2 minutes.
+// Tell the Worker which room is live, so the permanent P1 / friend links resolve to it. Re-sent every minute: the Worker treats a registration older than 150 s as 'not running'.
 let lastRegistered = "", registeredAt = 0;
 async function register(cfg, status) {
   if (!cfg.vmSecret || !cfg.origin || !status.ready) return;
   const slots = status.links.map(l => ({ port: l.port, slotToken: new URL(l.url).searchParams.get("slot") })).filter(s => s.slotToken);
   const body = JSON.stringify({ room: status.room, boot: status.boot, slots });
-  if (body === lastRegistered && Date.now() - registeredAt < 120000) return;
+  if (body === lastRegistered && Date.now() - registeredAt < 60000) return;
   try {
     const r = await fetch(`${cfg.origin}/api/vm/register`, { method: "POST", headers: { authorization: `Bearer ${cfg.vmSecret}`, "content-type": "application/json" }, body });
     if (r.ok) { lastRegistered = body; registeredAt = Date.now(); log("registered room with the Worker"); } else log("worker registration failed", r.status);
@@ -106,10 +107,45 @@ async function register(cfg, status) {
 // --- main loop -------------------------------------------------------------------------------------------
 mkdirSync(STATE_DIR, { recursive: true });
 const myBoot = bootId();
-const startedAt = Date.now(); // the grace period counts from when the services start, so a long first-run build does not eat it
-let lastPublished = "", sessionHappened = false, lastGuestAt = 0, clickAt = 0, lastRoom = null;
+let lastPublished = "", sessionHappened = false, lastGuestAt = 0, clickAt = 0, captureAt = 0, lastRoom = null, lastTickAt = Date.now(), startedAt = Date.now();
+
+// A gap far longer than a tick means the VM was suspended and resumed: its Chrome tab holds a room the Worker may have expired
+// (rooms live 30 min without a socket) and dead sockets, so restart Chrome for a fresh room and start the idle clocks over.
+async function checkResume() {
+  const now = Date.now();
+  const gap = now - lastTickAt;
+  lastTickAt = now;
+  if (gap < 20000) return false;
+  log(`clock gap of ${Math.round(gap / 1000)} s: resumed from suspend`);
+  startedAt = now; lastGuestAt = 0; sessionHappened = false; lastPublished = ""; lastRegistered = ""; registeredAt = 0;
+  // Rooms live 30 min without a socket, so only a short suspend can have kept one. The first probe usually fails (the old TCP
+  // connection is dead; sending on it is what makes the page notice and reconnect), a second one a moment later succeeds.
+  let alive = false;
+  if (gap < 25 * 60000) for (let i = 0; i < 3 && !alive; i++) { alive = await evaluate("window.__smashSignalProbe()").catch(() => false); if (!alive) await new Promise(r => setTimeout(r, 800)); }
+  if (alive) log("signaling socket and room survived the suspend; keeping the host page");
+  else {
+    log("signaling is dead or the room expired; restarting the host page for a fresh room");
+    lastRoom = null; try { socket?.close(); } catch { /* already dead */ } socket = null;
+    execFile("sudo", ["-n", "systemctl", "restart", "smash-chrome"], () => {});
+    await new Promise(r => setTimeout(r, 6000));
+  }
+  lastTickAt = Date.now();
+  return true;
+}
+
+async function idleStop(cfg) {
+  if (cfg.idleAction === "suspend" && cfg.vmSecret && cfg.origin) {
+    try {
+      const r = await fetch(`${cfg.origin}/api/vm/suspend`, { method: "POST", headers: { authorization: `Bearer ${cfg.vmSecret}` } });
+      if (r.ok) { log("asked the Worker to suspend this VM"); return; }
+      log("suspend request refused", r.status);
+    } catch (e) { log("suspend request failed", e.message); }
+  }
+  if (cfg.poweroff) execFile("sudo", ["-n", "systemctl", "poweroff"], () => {});
+}
 
 async function tick() {
+  if (await checkResume()) return;
   const cfg = settings();
   let st;
   try { st = await evaluate(PAGE_STATE); } catch (e) { log("page not ready:", e.message); return; }
@@ -117,7 +153,7 @@ async function tick() {
   const gameUp = await gameWindowUp(); // also raises the game above Chrome: capture is the whole screen
   if (st.room !== lastRoom) { log("room", st.room); lastRoom = st.room; }
   if (!st.room && st.startEnabled && now - clickAt > 5000) { clickAt = now; log("creating room"); await evaluate("document.querySelector('#start').click()").catch(() => {}); }
-  else if (st.room && !st.captured && now - clickAt > 8000 && gameUp) { clickAt = now; log("starting capture"); await evaluate("document.querySelector('#resume').click()").catch(() => {}); }
+  else if (st.room && !st.captured && now - captureAt > 8000 && gameUp) { captureAt = now; log("starting capture"); await evaluate("document.querySelector('#resume').click()").catch(() => {}); }
 
   const connected = Object.values(st.slots).filter(v => v === "connected" || v === "connecting").length;
   if (connected > 0) { sessionHappened = true; lastGuestAt = now; }
@@ -134,8 +170,8 @@ async function tick() {
   if (connected === 0) {
     const expired = sessionHappened ? idleFor >= cfg.idleMin : (now - startedAt) / 60000 >= cfg.bootGraceMin;
     if (expired) {
-      log(`idle shutdown (${sessionHappened ? `no guest for ${idleFor.toFixed(1)} min` : "no guest since boot"}); poweroff=${cfg.poweroff}`);
-      if (cfg.poweroff) execFile("sudo", ["-n", "systemctl", "poweroff"], () => {});
+      log(`idle (${sessionHappened ? `no guest for ${idleFor.toFixed(1)} min` : "no guest since start"}); action=${cfg.idleAction}`);
+      await idleStop(cfg);
       await new Promise(r => setTimeout(r, 60000));
     }
   }

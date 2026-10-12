@@ -37,6 +37,11 @@ cmake.write_text(text.replace(old, new, 1))
 PY
   : > "$BS/.smash-online-patches-applied"
 fi
+# Native roster page jump (the web shell's search dialog has no native equivalent): see roster-page.patch. It lives in the decomp submodule.
+if [[ ! -f "$BS/decomp/.smash-online-roster-page-applied" ]]; then
+  git -C "$BS/decomp" apply "$(dirname "$0")/roster-page.patch"
+  : > "$BS/decomp/.smash-online-roster-page-applied"
+fi
 VENV="$BUILD_ROOT/venv"
 [[ -x "$VENV/bin/python" ]] || { python3 -m venv "$VENV"; "$VENV/bin/pip" install -q Pillow; }
 cmake -S "$BS" -B "$BS/build-us" -GNinja -DCMAKE_BUILD_TYPE=Release -DSSB64_VERSION=us -DSSB64_BASEROM="$ROM" -DPython3_EXECUTABLE="$VENV/bin/python"

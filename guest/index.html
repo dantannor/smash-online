@@ -18,6 +18,9 @@
     #audio{display:none}
     .buttons{flex:none;display:flex;gap:10px;justify-content:center}.action{border:0;border-radius:999px;padding:10px 20px;color:white;background:#5b5be8;font:inherit;font-weight:700;cursor:pointer}.action.secondary{background:#272b36}
     .hint{position:absolute;inset:12px 16px auto;text-align:center;color:#d4d4d8;background:#10131bdc;border-radius:8px;padding:10px}
+    .finder{position:absolute;top:10px;right:10px;bottom:10px;width:min(360px,calc(100% - 20px));z-index:5;display:flex;flex-direction:column;gap:8px;padding:10px;background:#10131bf2;border-radius:10px;color:#e4e4e7;font-size:.85rem}
+    .finder[hidden]{display:none}.finder-head{display:flex;align-items:center;justify-content:space-between;gap:8px}.finder-nav{display:flex;gap:6px;flex-wrap:wrap}.finder button{border:0;border-radius:8px;padding:6px 10px;background:#272b36;color:inherit;font:inherit;cursor:pointer}.finder input{padding:6px 8px;border-radius:8px;border:1px solid #333a4a;background:#1b2030;color:inherit;font:inherit;min-width:0}#page-input{width:5.5rem}
+    #finder-results{flex:1;min-height:0;overflow:auto;margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:4px}#finder-results button{width:100%;text-align:left}.finder-hint{margin:0;color:#aeb2bf;font-size:.75rem}
     .legend{flex:none;margin:0;text-align:center;color:#aeb2bf;font-size:.8rem}
     .help{flex:none;margin:0 auto;max-width:760px;color:#aeb2bf;font-size:.85rem;line-height:1.5}.help summary{cursor:pointer;color:#e4e4e7;text-align:center}.help[open]{max-height:38vh;overflow:auto}.error{color:#ff9b9b}
     @media (max-height:520px){.app{padding:4px 8px;gap:4px}.title{font-size:.9rem}.stats{font-size:.7rem;gap:8px}.action{padding:5px 14px;font-size:.8rem}.legend,.help{display:none}}
@@ -26,8 +29,15 @@
 <body>
   <main class="app">
     <header class="top"><div class="title">Smash Online <span id="slot">Guest</span></div><div class="stats"><span id="connection">Connecting…</span><span id="ping">RTT: --</span><span id="fps">FPS: --</span><span id="controller">Controller: Keyboard</span></div></header>
-    <section class="screen" id="screen"><video id="video" autoplay muted playsinline></video><audio id="audio" autoplay></audio><div class="hint" id="hint">Waiting for the host…</div></section>
-    <div class="buttons"><button class="action" id="sound" type="button">Click to enable sound</button><button class="action secondary" id="fullscreen" type="button">Fullscreen (F)</button></div>
+    <section class="screen" id="screen"><video id="video" autoplay muted playsinline></video><audio id="audio" autoplay></audio><aside class="finder" id="finder" hidden>
+        <div class="finder-head"><strong>Fighters</strong><span id="finder-page">Page 1</span><button type="button" id="finder-close" aria-label="Close">✕</button></div>
+        <div class="finder-nav"><button type="button" id="page-originals">Originals</button><button type="button" id="page-prev">◀ Prev</button><button type="button" id="page-next">Next ▶</button><input id="page-input" type="number" min="0" placeholder="page" aria-label="Page number"><button type="button" id="page-go">Go</button></div>
+        <input id="finder-search" type="search" placeholder="Search all fighters…" autocomplete="off">
+        <ul id="finder-results"></ul>
+        <p class="finder-hint">Pick a fighter or page: the game's character select flips there for everyone. Then move your hand cursor onto the fighter and press J (A). Q / E also flip pages.</p>
+      </aside>
+      <div class="hint" id="hint">Waiting for the host…</div></section>
+    <div class="buttons"><button class="action" id="sound" type="button">Click to enable sound</button><button class="action secondary" id="fighters" type="button">Fighters</button><button class="action secondary" id="fullscreen" type="button">Fullscreen (F)</button></div>
     <p class="legend">WASD / arrows: stick · J: A · K: B · L: Z · Shift: half stick (tilt) · F: fullscreen</p>
     <details class="help"><summary>Controls</summary>
       <p>Keyboard: WASD or arrows move the stick at full tilt, and arrows also press the D-pad. <b>Hold Shift for a half stick</b> (tilts and walking). J=A, K=B, L=Z, Q=L, E=R, Enter=Start, U/N/H/I = C-up/down/left/right, F = fullscreen (Esc leaves it).</p>
