@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const PORT = 8900 + Math.floor(Math.random() * 90);
 const origin = `http://127.0.0.1:${PORT}`;
-const P1 = "p1-secret-for-tests", FRIEND = "friend-secret-for-tests", VM = "vm-secret-for-tests";
+const P1 = "p1_secret_for_tests", FRIEND = "friend_secret_for_tests", VM = "vm_secret_for_tests";
 const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const saJson = JSON.stringify({ client_email: "wake@test.iam.gserviceaccount.com", private_key: privateKey.export({ type: "pkcs8", format: "pem" }) });
 
@@ -59,7 +59,21 @@ test("wrong secrets get 404 and the VM stays down", async () => {
   assert.equal((await get("/go/nope")).status, 404);
   assert.equal((await get("/go/nope/status?wake=1")).status, 404);
   assert.equal((await get("/p/nope/2")).status, 404);
+  assert.equal((await get("/go/wrong%5C_secret")).status, 404);
+  assert.equal((await get("/p/wrong%5C_secret/2")).status, 404);
   assert.equal(gcp.starts, 0);
+});
+
+test("markdown-escaped underscores work in permanent links without waking the VM", async () => {
+  const escapedP1 = P1.replace("_", "%5C_");
+  const escapedFriend = FRIEND.replace("_", "%5C_");
+  const goPage = await get(`/go/${escapedP1}`);
+  assert.equal(goPage.status, 200);
+  assert.match(await goPage.text(), /Starting server/);
+  const friendPage = await get(`/p/${escapedFriend}/2`);
+  assert.equal(friendPage.status, 200);
+  assert.match(await friendPage.text(), /Waiting for the host/);
+  assert.equal(gcp.starts, 0, "opening either link does not start the VM");
 });
 
 test("pages show the starting / waiting state and the permanent friend links", async () => {

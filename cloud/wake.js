@@ -3,6 +3,12 @@
 const enc = new TextEncoder();
 const b64url = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 const json = (status, data) => new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
+const pathSecret = (segment) => {
+  try {
+    const secret = decodeURIComponent(segment).replaceAll("\\", "");
+    return /^[A-Za-z0-9_-]+$/.test(secret) ? secret : null;
+  } catch { return null; }
+};
 const html = (body, status = 200) => new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "referrer-policy": "no-referrer", "x-robots-tag": "noindex" } });
 
 async function sameSecret(supplied, expected) {
@@ -95,10 +101,11 @@ export async function handleWake(request, env, url) {
     return json(200, { ok: true });
   }
 
-  const p1 = url.pathname.match(/^\/go\/([A-Za-z0-9_-]+)(\/status)?$/);
+  const p1 = url.pathname.match(/^\/go\/([^/]+)(\/status)?$/);
   if (p1) {
-    if (!(await sameSecret(p1[1], env.P1_SECRET))) return html("Not found", 404);
-    const base = `/go/${p1[1]}`;
+    const secret = pathSecret(p1[1]);
+    if (!secret || !(await sameSecret(secret, env.P1_SECRET))) return html("Not found", 404);
+    const base = `/go/${secret}`;
     if (p1[2]) {
       const s = await vmState(env, { wake: url.searchParams.get("wake") === "1" }).catch((e) => ({ state: "error", error: e.message }));
       if (s.state === "ready" && s.slots[1]) return json(200, { state: "ready", url: playUrl(origin, s.room, s.slots[1]) });
@@ -108,15 +115,16 @@ export async function handleWake(request, env, url) {
     return waitPage({ title: "Starting the Smash server", message: "Starting server, about 60 seconds", statusUrl: `${base}/status?wake=1`, extra: `<h2>Friend links</h2>${friends}` });
   }
 
-  const friend = url.pathname.match(/^\/p\/([A-Za-z0-9_-]+)\/([2-4])(\/status)?$/);
+  const friend = url.pathname.match(/^\/p\/([^/]+)\/([2-4])(\/status)?$/);
   if (friend) {
-    if (!(await sameSecret(friend[1], env.FRIEND_SECRET))) return html("Not found", 404);
+    const secret = pathSecret(friend[1]);
+    if (!secret || !(await sameSecret(secret, env.FRIEND_SECRET))) return html("Not found", 404);
     const port = Number(friend[2]);
     const s = await vmState(env).catch(() => ({ state: "error" }));
     const ready = s.state === "ready" && s.slots[port];
     if (friend[3]) return json(200, ready ? { state: "ready", url: playUrl(origin, s.room, s.slots[port]) } : { state: s.state, message: "Waiting for the host to start the game" });
     if (ready) return new Response(null, { status: 302, headers: { location: playUrl(origin, s.room, s.slots[port]), "cache-control": "no-store" } });
-    return waitPage({ title: `Smash Online, player ${port}`, message: "Waiting for the host to start the game", statusUrl: `/p/${friend[1]}/${port}/status` });
+    return waitPage({ title: `Smash Online, player ${port}`, message: "Waiting for the host to start the game", statusUrl: `/p/${secret}/${port}/status` });
   }
   return null;
 }
