@@ -29,10 +29,13 @@
      if (idx < 0)
 --- a/src/mn/mnplayers/mnplayersvs.c
 +++ b/src/mn/mnplayers/mnplayersvs.c
-@@ -5434,6 +5434,47 @@
+@@ -5434,6 +5434,51 @@
  	}
  }
  
++/* Set by Play vs CPU: the match starts on a random stage instead of opening the stage select (cleared when the match is staged). */
++static sb32 sPortSoloSkipStageSelect = FALSE;
++
 +/* Smash Online "Play vs CPU": the requesting player gets a fighter if it has none, every port that is not a connected guest (up to
 + * cpu_count of them) becomes a CPU with a random original fighter, and the match starts as if Start had been pressed. */
 +static void mnPlayersVSPortSolo(s32 req, s32 connected_mask, s32 cpu_count)
@@ -70,6 +73,7 @@
 +	func_800269C0_275C0(nSYAudioVoicePublicCheer);
 +	mnPlayersVSSetIdlePlayerNotAll();
 +	sMNPlayersVSStartProceedWait = 30;
++	sPortSoloSkipStageSelect = TRUE;
 +	sMNPlayersVSIsStart = TRUE;
 +	mnPlayersVSPauseSlotProcesses();
 +}
@@ -77,7 +81,7 @@
  static void mnPlayersVSPortPageInput(void)
  {
  	extern s32 port_roster_take_page_request(void);
-@@ -5462,7 +5503,13 @@
+@@ -5462,7 +5507,13 @@
  		/* Smash Online host: put a chosen fighter on a chosen player (the web fighter grid), the same path the pin drop uses */
  		extern s32 port_roster_take_pick(s32 *player, s32 *page, s32 *tile_fkind);
  		s32 pl, pg, fk;
@@ -92,3 +96,18 @@
  		{
  			port_roster_set_page(pg);
  			mnPlayersVSPortApplyRosterPage();
+@@ -5594,12 +5645,13 @@
+ 				}
+ 			}
+ #endif
+-			if (gSCManagerTransferBattleState.is_stage_select != FALSE)
++			if ((gSCManagerTransferBattleState.is_stage_select != FALSE) && (sPortSoloSkipStageSelect == FALSE))
+ 			{
+ 				gSCManagerSceneData.scene_curr = nSCKindMaps;
+ 			}
+ 			else
+ 			{
++				sPortSoloSkipStageSelect = FALSE;
+ 				gSCManagerSceneData.scene_curr = nSCKindVSBattle;
+ 				{
+ 					// Port-introduced playable stages (Final Destination, Metal Cavern,
