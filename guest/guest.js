@@ -263,7 +263,7 @@ fullscreenButton.addEventListener('click', () => { void ensurePlaying(); toggleF
 for (const type of ['fullscreenchange', 'webkitfullscreenchange']) document.addEventListener(type, () => { fullscreenButton.textContent = fullscreenElement() ? 'Exit fullscreen (Esc)' : 'Fullscreen (F)'; });
 window.addEventListener('keydown', event => { if (event.code === 'KeyF' && !typingOrGrid(event) && !event.repeat && !event.metaKey && !event.ctrlKey && !event.altKey) toggleFullscreen(); });
 setInterval(() => sendInput(true), 1000 / 60);
-window.__smashGuest = { state, ensurePlaying, stats: async () => ({ ...state, rtcStats: peer ? [...(await peer.getStats()).values()] : [] }), get lastInput() { return { ...lastInput }; }, setVirtualInput };
+window.__smashGuest = { state, ensurePlaying, attachMeta, stats: async () => ({ ...state, rtcStats: peer ? [...(await peer.getStats()).values()] : [] }), get lastInput() { return { ...lastInput }; }, setVirtualInput };
 if (params.get('fakeInput') === 'script') {
   let tick = 0; setInterval(() => { tick++; setVirtualInput({ buttons: tick % 2 ? 0x8000 : 0, sx: tick % 2 ? 30 : -30, sy: 0 }); }, 500);
 }
