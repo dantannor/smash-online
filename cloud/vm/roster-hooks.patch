@@ -1,0 +1,127 @@
+diff --git a/src/ft/ftport.c b/src/ft/ftport.c
+index 75b12909b..c9a52ae2b 100644
+--- a/src/ft/ftport.c
++++ b/src/ft/ftport.c
+@@ -1653,10 +1653,90 @@ void port_roster_request_page(s32 page)
+     sPageRequest = page;
+ }
+ 
++#ifndef __EMSCRIPTEN__
++#include <fcntl.h>
++#include <unistd.h>
++/* Native shell hook (Smash Online cloud host): SSB64_ROSTER_PAGE_FILE holds "<seq> <page>". The web shell's search dialog
++ * calls port_roster_request_page(); here the host writes the file instead and a NEW seq is a page request. The seq present
++ * when the game starts is consumed, so a stale request never overrides SSB64_ROSTER_PAGE. */
++static s32 port_roster_file_page_request(void)
++{
++    static int fd = -1;
++    static long lastSeq = -1;
++    static int poll = 0;
++    char buf[32];
++    ssize_t n;
++    long seq;
++    int page;
++    if (fd < 0)
++    {
++        const char *path = getenv("SSB64_ROSTER_PAGE_FILE");
++        if (path == NULL || (poll++ % 60) != 0) return -1;
++        fd = open(path, O_RDONLY);
++        if (fd < 0) return -1;
++    }
++    n = pread(fd, buf, sizeof buf - 1, 0);
++    if (n <= 0) return -1;
++    buf[n] = '\0';
++    if (sscanf(buf, "%ld %d", &seq, &page) != 2) return -1;
++    if (lastSeq < 0) { lastSeq = seq; return -1; }
++    if (seq == lastSeq) return -1;
++    lastSeq = seq;
++    return page;
++}
++#endif
++
++#ifndef __EMSCRIPTEN__
++/* Native shell hook: SSB64_ROSTER_PICK_FILE holds "<seq> <player 0-3> <idx>": idx >= 0 is registry row idx (a custom fighter),
++ * idx < 0 is the original on tile fkind (-1 - idx). A new seq is a request to put that fighter on that player. Like the page
++ * file, the seq present at start is consumed so a stale request never replays. */
++s32 port_roster_take_pick(s32 *player, s32 *page, s32 *tile_fkind)
++{
++    static int fd = -1;
++    static long lastSeq = -1;
++    static int poll = 0;
++    char buf[48];
++    ssize_t n;
++    long seq;
++    int pl, idx;
++    if (fd < 0)
++    {
++        const char *path = getenv("SSB64_ROSTER_PICK_FILE");
++        if (path == NULL || (poll++ % 30) != 0) return 0;
++        fd = open(path, O_RDONLY);
++        if (fd < 0) return 0;
++    }
++    n = pread(fd, buf, sizeof buf - 1, 0);
++    if (n <= 0) return 0;
++    buf[n] = '\0';
++    if (sscanf(buf, "%ld %d %d", &seq, &pl, &idx) != 3) return 0;
++    if (lastSeq < 0) { lastSeq = seq; return 0; }
++    if (seq == lastSeq) return 0;
++    lastSeq = seq;
++    port_roster_parse();
++    if (pl < 0 || pl > 3) return 0;
++    if (idx < 0)
++    {
++        if (-1 - idx >= OSB5_SLOTS) return 0;
++        *page = 0; *tile_fkind = -1 - idx;
++    }
++    else
++    {
++        if (idx >= sNChars) return 0;
++        *page = 1 + idx / OSB5_SLOTS; *tile_fkind = sChars[idx].fkind;
++    }
++    *player = pl;
++    return 1;
++}
++#endif
++
+ s32 port_roster_take_page_request(void)
+ {
+     s32 r = sPageRequest;
+     sPageRequest = -1;
++#ifndef __EMSCRIPTEN__
++    if (r < 0) r = port_roster_file_page_request();
++#endif
+     return r;
+ }
+ 
+diff --git a/src/mn/mnplayers/mnplayersvs.c b/src/mn/mnplayers/mnplayersvs.c
+index 816ac2716..1c7c137f7 100644
+--- a/src/mn/mnplayers/mnplayersvs.c
++++ b/src/mn/mnplayers/mnplayersvs.c
+@@ -5458,6 +5458,27 @@ static void mnPlayersVSPortPageInput(void)
+ 		extern void port_log(const char *fmt, ...);
+ 		port_log("PAGER: tap dir=%d cooldown=%d tic=%d\n", (int)dir, (int)sFlipCooldown, (int)sMNPlayersVSTotalTimeTics);
+ 	}
++	{
++		/* Smash Online host: put a chosen fighter on a chosen player (the web fighter grid), the same path the pin drop uses */
++		extern s32 port_roster_take_pick(s32 *player, s32 *page, s32 *tile_fkind);
++		s32 pl, pg, fk;
++		if (port_roster_take_pick(&pl, &pg, &fk))
++		{
++			port_roster_set_page(pg);
++			mnPlayersVSPortApplyRosterPage();
++			sMNPlayersVSSlots[pl].fkind = fk;
++			sMNPlayersVSSlots[pl].costume = 0;
++			sMNPlayersVSSlots[pl].pkind = nFTPlayerKindMan;
++			sMNPlayersVSSlots[pl].is_selected = TRUE;
++			sMNPlayersVSSlots[pl].is_fighter_selected = TRUE;
++			sMNPlayersVSSlots[pl].is_status_selected = FALSE;
++			mnPlayersVSMakeFighter(sMNPlayersVSSlots[pl].player, pl, fk, 0);
++			if (sMNPlayersVSSlots[pl].puck != NULL) mnPlayersVSCenterPuckInPortrait(sMNPlayersVSSlots[pl].puck, fk);
++			mnPlayersVSPortRefreshHeldPreviews();
++			sFlipCooldown = 12;
++			return;
++		}
++	}
+ 	req = port_roster_take_page_request();
+ 	if (req >= 0 && req != port_roster_page())
+ 	{

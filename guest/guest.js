@@ -11,7 +11,7 @@ const room = params.get('room');
 const slotToken = params.get('slot');
 const keyState = new Set();
 const state = { connection: 'connecting', connected: false, slot: null, port: null, controller: 'Keyboard', ping: null, fps: null, error: null };
-let offerWatchdog;
+let offerWatchdog, missedOffers = 0;
 let metaChannel = null; // reliable side channel from the host (fighter finder)
 let peer, ws, dataChannel, videoStream, audioStream;
 let soundOn = false; // the video is always muted (so it autoplays everywhere); a user gesture only unlocks the separate audio element
@@ -117,7 +117,13 @@ async function connect() {
       // The host answers a connected slot with an offer within a second or two; if it never does (it was busy starting up, or lost
       // the slot:connected), reconnect so the host sees this slot connect again instead of waiting on it forever.
       clearTimeout(offerWatchdog);
-      offerWatchdog = setTimeout(() => { if (ownGeneration === generation && !state.connected) scheduleReconnect('no offer from the host'); }, 12000);
+      offerWatchdog = setTimeout(() => {
+        if (ownGeneration !== generation || state.connected) return;
+        // Twice in a row means the room itself is gone (the host restarted into a new one): go back through the permanent link,
+        // which hands out the current room. Direct room links have no entry point, so those just keep retrying.
+        if (++missedOffers >= 2 && sessionStorage.getItem('smash-entry')) { location.replace(sessionStorage.getItem('smash-entry')); return; }
+        scheduleReconnect('no offer from the host');
+      }, 12000);
     };
     ws.onmessage = (event) => { if (ownGeneration === generation) void handleSignal(event.data, ownGeneration); };
     ws.onerror = () => { if (ownGeneration === generation) scheduleReconnect('signaling error'); };
@@ -181,7 +187,7 @@ function createPeer(ownGeneration) {
     if (channel.label === 'meta') { attachMeta(channel); return; }
     if (channel.label !== 'input') { channel.close(); return; }
     dataChannel = channel;
-    channel.onopen = () => { if (ownGeneration === generation) { reconnectDelay = 500; setState('Connected'); sendInput(true); } };
+    channel.onopen = () => { if (ownGeneration === generation) { reconnectDelay = 500; missedOffers = 0; setState('Connected'); sendInput(true); } };
     channel.onclose = () => { if (ownGeneration === generation) scheduleReconnect('input channel closed'); };
     channel.onerror = () => { if (ownGeneration === generation) scheduleReconnect('input channel error'); };
   };
@@ -257,55 +263,79 @@ if (params.get('fakeInput') === 'script') {
 }
 connect();
 
-// ---- fighter finder -------------------------------------------------------------------------------------------
-// The host sends the roster over a reliable "meta" channel; picking a result asks the host to flip the game's
-// character select to that page (the game has 12 original tiles on page 0 and 12 custom fighters per page after).
-const finder = { originals: [], custom: [], pages: 1, page: 1 };
-const finderEl = document.querySelector('#finder');
-const finderResults = document.querySelector('#finder-results');
-const finderSearch = document.querySelector('#finder-search');
-const finderPage = document.querySelector('#finder-page');
+// ---- fighter grid ---------------------------------------------------------------------------------------------
+// Like smash.fun: every fighter on one scrollable screen with search. The host sends the roster over a reliable "meta" channel
+// (originals as name tiles, custom fighters with smash.fun's public portrait assets); a click asks the host to put that fighter
+// on THIS player's port in the game's character select (host page -> sidecar -> file the game polls).
+const TILE_FKINDS = [4, 0, 2, 5, 3, 7, 11, 6, 8, 1, 9, 10]; // original on character-select tile i (left to right, top row first) -> game fighter kind
+const PORTRAIT_BASE = 'https://storage.googleapis.com/smash-the-weights-fighter-assets/baked/v1/objects/';
+const grid = { originals: [], custom: [], page: 1, pages: 1, picked: null };
+const gridEl = document.querySelector('#finder');
+const gridBody = document.querySelector('#finder-results');
+const gridSearch = document.querySelector('#finder-search');
+const gridNote = document.querySelector('#finder-page');
 function typingTarget(event) { return event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement; }
 function attachMeta(channel) {
   metaChannel = channel;
   channel.onmessage = ({ data }) => {
     let message;
     try { message = JSON.parse(data); } catch { return; }
-    if (message.type === 'roster:begin') { finder.originals = message.originals || []; finder.custom = []; finder.pages = message.pages || 1; finder.page = message.page ?? 1; }
-    else if (message.type === 'roster:chunk') { for (const item of message.items || []) finder.custom.push(item); }
-    else if (message.type === 'roster:page') finder.page = message.page;
-    renderFinder();
+    if (message.type === 'roster:begin') { grid.originals = message.originals || []; grid.custom = []; grid.pages = message.pages || 1; grid.page = message.page ?? 1; }
+    else if (message.type === 'roster:chunk') { for (const item of message.items || []) grid.custom.push(item); }
+    else if (message.type === 'roster:end') grid.ready = true;
+    else if (message.type === 'roster:page') grid.page = message.page;
+    if (!gridEl.hidden) renderGrid();
   };
 }
-function requestPage(page) {
-  const target = ((page % finder.pages) + finder.pages) % finder.pages;
-  finder.page = target;
-  if (metaChannel?.readyState === 'open') metaChannel.send(JSON.stringify({ type: 'roster:page', page: target }));
-  renderFinder();
+function sendMeta(value) { if (metaChannel?.readyState === 'open') { metaChannel.send(JSON.stringify(value)); return true; } return false; }
+function pickFighter(idx, name) {
+  if (!sendMeta({ type: 'roster:pick', idx })) { gridNote.textContent = 'Not connected yet'; return; }
+  grid.picked = idx;
+  gridNote.textContent = `Picked ${name} for ${slotLabel.textContent}. Close this to see the game.`;
+  renderGrid();
 }
-function renderFinder() {
-  finderPage.textContent = `Page ${finder.page} of ${finder.pages - 1}${finder.page === 0 ? ' (originals)' : ''}`;
-  const query = finderSearch.value.trim().toLowerCase();
-  const rows = [];
-  finder.originals.forEach(name => rows.push({ name, page: 0, note: 'original' }));
-  finder.custom.forEach(([name, base], index) => rows.push({ name, page: 1 + Math.floor(index / 12), note: `plays like ${base}` }));
-  const matches = (query ? rows.filter(row => row.name.toLowerCase().includes(query)) : rows.filter(row => row.page === finder.page)).slice(0, 80);
-  finderResults.replaceChildren(...matches.map(row => {
-    const item = document.createElement('li');
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.textContent = `${row.name} · page ${row.page} · ${row.note}`;
-    button.addEventListener('click', () => requestPage(row.page));
-    item.append(button);
-    return item;
-  }));
-  if (!matches.length) { const item = document.createElement('li'); item.textContent = finder.custom.length || finder.originals.length ? 'No fighter matches.' : 'Fighter list not available yet.'; finderResults.append(item); }
+const portraitUrl = value => !value ? '' : /^[a-f0-9]{64}$/.test(value) ? `${PORTRAIT_BASE}${value}/portrait_medium.png` : (/^https:\/\//.test(value) ? value : '');
+function tile(name, sub, idx, imageUrl) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = `tile${grid.picked === idx ? ' picked' : ''}${imageUrl ? '' : ' nameonly'}`;
+  button.title = `${name}${sub ? ` (${sub})` : ''}`;
+  if (imageUrl) { const img = document.createElement('img'); img.loading = 'lazy'; img.decoding = 'async'; img.alt = ''; img.src = imageUrl; button.append(img); }
+  const label = document.createElement('span');
+  label.textContent = name;
+  button.append(label);
+  button.addEventListener('click', () => pickFighter(idx, name));
+  return button;
 }
-document.querySelector('#fighters').addEventListener('click', () => { finderEl.hidden = !finderEl.hidden; if (!finderEl.hidden) { renderFinder(); finderSearch.focus(); } });
-document.querySelector('#finder-close').addEventListener('click', () => { finderEl.hidden = true; });
-document.querySelector('#page-prev').addEventListener('click', () => requestPage(finder.page - 1));
-document.querySelector('#page-next').addEventListener('click', () => requestPage(finder.page + 1));
-document.querySelector('#page-originals').addEventListener('click', () => requestPage(0));
-document.querySelector('#page-go').addEventListener('click', () => { const value = Number(document.querySelector('#page-input').value); if (Number.isInteger(value)) requestPage(value); });
-finderSearch.addEventListener('input', renderFinder);
-finderSearch.addEventListener('keydown', event => { if (event.key === 'Escape') { finderEl.hidden = true; finderSearch.blur(); } });
+function section(title, tiles) {
+  const wrap = document.createElement('section');
+  const head = document.createElement('h3');
+  head.textContent = `${title} (${tiles.length})`;
+  const body = document.createElement('div');
+  body.className = 'tiles';
+  body.append(...tiles);
+  wrap.append(head, body);
+  return wrap;
+}
+function renderGrid() {
+  const query = gridSearch.value.trim().toLowerCase();
+  const hit = name => !query || name.toLowerCase().includes(query);
+  const originals = grid.originals.map((name, i) => [name, -1 - TILE_FKINDS[i]]).filter(([name]) => hit(name)).map(([name, idx]) => tile(name, 'original', idx, ''));
+  const custom = [];
+  for (let i = 0; i < grid.custom.length; i++) { const [name, base, portrait] = grid.custom[i]; if (hit(name)) custom.push(tile(name, `plays like ${base}`, i, portraitUrl(portrait))); }
+  const parts = [];
+  if (originals.length) parts.push(section('Originals', originals));
+  if (custom.length) parts.push(section('Custom fighters', custom));
+  if (!parts.length) { const p = document.createElement('p'); p.className = 'finder-hint'; p.textContent = grid.originals.length || grid.custom.length ? 'No fighter matches.' : 'Fighter list not available yet.'; parts.push(p); }
+  gridBody.replaceChildren(...parts);
+}
+document.querySelector('#fighters').addEventListener('click', () => { gridEl.hidden = !gridEl.hidden; if (!gridEl.hidden) { renderGrid(); gridSearch.focus(); } });
+document.querySelector('#finder-close').addEventListener('click', () => { gridEl.hidden = true; });
+gridSearch.addEventListener('input', renderGrid);
+gridSearch.addEventListener('keydown', event => { if (event.key === 'Escape') { gridEl.hidden = true; gridSearch.blur(); } });
+
+// Optional guest-side sharpening for a soft (low bitrate or upscaled) picture; remembered per browser.
+const sharpenButton = document.querySelector('#sharpen');
+function applySharpen(on) { video.classList.toggle('sharp', on); sharpenButton.setAttribute('aria-pressed', String(on)); try { localStorage.setItem('smash-sharpen', on ? '1' : '0'); } catch {} }
+sharpenButton.addEventListener('click', () => applySharpen(!video.classList.contains('sharp')));
+try { if (localStorage.getItem('smash-sharpen') === '1') applySharpen(true); } catch {}

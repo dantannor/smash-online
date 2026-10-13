@@ -86,7 +86,7 @@ async function publish(value) {
   const body = JSON.stringify(value);
   try {
     writeFileSync(join(STATE_DIR, "status.json"), body, { mode: 0o600 });
-    const r = await fetch("http://metadata.google.internal/computeMetadata/v1/instance/guest-attributes/smash/status", { method: "PUT", headers: { "Metadata-Flavor": "Google" }, body });
+    const r = await fetch("http://metadata.google.internal/computeMetadata/v1/instance/guest-attributes/smash/status", { method: "PUT", headers: { "Metadata-Flavor": "Google" }, body, signal: AbortSignal.timeout(8000) });
     if (!r.ok) log("guest attribute publish failed", r.status);
   } catch (e) { log("publish error", e.message); }
 }
@@ -99,7 +99,7 @@ async function register(cfg, status) {
   const body = JSON.stringify({ room: status.room, boot: status.boot, slots });
   if (body === lastRegistered && Date.now() - registeredAt < 60000) return;
   try {
-    const r = await fetch(`${cfg.origin}/api/vm/register`, { method: "POST", headers: { authorization: `Bearer ${cfg.vmSecret}`, "content-type": "application/json" }, body });
+    const r = await fetch(`${cfg.origin}/api/vm/register`, { method: "POST", headers: { authorization: `Bearer ${cfg.vmSecret}`, "content-type": "application/json" }, body, signal: AbortSignal.timeout(8000) });
     if (r.ok) { lastRegistered = body; registeredAt = Date.now(); log("registered room with the Worker"); } else log("worker registration failed", r.status);
   } catch (e) { log("worker registration error", e.message); }
 }
@@ -107,7 +107,7 @@ async function register(cfg, status) {
 // --- main loop -------------------------------------------------------------------------------------------
 mkdirSync(STATE_DIR, { recursive: true });
 const myBoot = bootId();
-let lastPublished = "", sessionHappened = false, lastGuestAt = 0, clickAt = 0, captureAt = 0, lastRoom = null, lastTickAt = Date.now(), startedAt = Date.now();
+let lastPublished = "", sessionHappened = false, lastGuestAt = 0, clickAt = 0, captureAt = 0, lastRoom = null, lastTickAt = Date.now(), startedAt = Date.now(), idleAskedAt = 0;
 
 // A gap far longer than a tick means the VM was suspended and resumed: its Chrome tab holds a room the Worker may have expired
 // (rooms live 30 min without a socket) and dead sockets, so restart Chrome for a fresh room and start the idle clocks over.
@@ -115,6 +115,7 @@ async function checkResume() {
   const now = Date.now();
   const gap = now - lastTickAt;
   lastTickAt = now;
+  if (gap > 4000) log(`slow tick: ${Math.round(gap / 100) / 10} s since the previous one`);
   if (gap < 20000) return false;
   log(`clock gap of ${Math.round(gap / 1000)} s: resumed from suspend`);
   startedAt = now; lastGuestAt = 0; sessionHappened = false; lastPublished = ""; lastRegistered = ""; registeredAt = 0;
@@ -124,10 +125,13 @@ async function checkResume() {
   if (gap < 25 * 60000) for (let i = 0; i < 3 && !alive; i++) { alive = await evaluate("window.__smashSignalProbe()").catch(() => false); if (!alive) await new Promise(r => setTimeout(r, 800)); }
   if (alive) log("signaling socket and room survived the suspend; keeping the host page");
   else {
-    log("signaling is dead or the room expired; restarting the host page for a fresh room");
+    log("signaling is dead or the room expired; reloading the host page for a fresh room");
     lastRoom = null; try { socket?.close(); } catch { /* already dead */ } socket = null;
-    execFile("sudo", ["-n", "systemctl", "restart", "smash-chrome"], () => {});
-    await new Promise(r => setTimeout(r, 6000));
+    // a reload is about 3 s; restarting Chrome took 8. The page re-attaches a saved room unless sessionStorage is cleared first.
+    const reloaded = await evaluate("(sessionStorage.removeItem('smash-host-room'), setTimeout(() => location.reload(), 50), 'reloading')").then(() => true).catch(() => false);
+    if (!reloaded) execFile("sudo", ["-n", "systemctl", "restart", "smash-chrome"], () => {});
+    await new Promise(r => setTimeout(r, reloaded ? 1500 : 6000));
+    clickAt = 0; captureAt = 0;
   }
   lastTickAt = Date.now();
   return true;
@@ -136,7 +140,7 @@ async function checkResume() {
 async function idleStop(cfg) {
   if (cfg.idleAction === "suspend" && cfg.vmSecret && cfg.origin) {
     try {
-      const r = await fetch(`${cfg.origin}/api/vm/suspend`, { method: "POST", headers: { authorization: `Bearer ${cfg.vmSecret}` } });
+      const r = await fetch(`${cfg.origin}/api/vm/suspend`, { method: "POST", headers: { authorization: `Bearer ${cfg.vmSecret}` }, signal: AbortSignal.timeout(8000) });
       if (r.ok) { log("asked the Worker to suspend this VM"); return; }
       log("suspend request refused", r.status);
     } catch (e) { log("suspend request failed", e.message); }
@@ -170,9 +174,8 @@ async function tick() {
   if (connected === 0) {
     const expired = sessionHappened ? idleFor >= cfg.idleMin : (now - startedAt) / 60000 >= cfg.bootGraceMin;
     if (expired) {
-      log(`idle (${sessionHappened ? `no guest for ${idleFor.toFixed(1)} min` : "no guest since start"}); action=${cfg.idleAction}`);
-      await idleStop(cfg);
-      await new Promise(r => setTimeout(r, 60000));
+      // do not block the loop (the VM freezes mid-await; a blind 60 s sleep here made every resume stall for about a minute)
+      if (now - idleAskedAt > 120000) { idleAskedAt = now; log(`idle (${sessionHappened ? `no guest for ${idleFor.toFixed(1)} min` : "no guest since start"}); action=${cfg.idleAction}`); void idleStop(cfg); }
     }
   }
 }

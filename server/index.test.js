@@ -180,7 +180,7 @@ test("/roster.json lists the originals and the staged custom fighters", async (t
   const ctx = await setup(); t.after(ctx.close);
   const body = await (await fetch(`${ctx.origin}/roster.json`)).json();
   assert.equal(body.originals.length, 12);
-  assert.deepEqual(body.custom, [{ name: "A Person", base: "Mario", page: 1 }, { name: "B Person", base: "Fox", page: 1 }]);
+  assert.deepEqual(body.custom.map((c) => [c.name, c.base, c.page]), [["A Person", "Mario", 1], ["B Person", "Fox", 1]]);
   delete process.env.SMASH_ROSTER_JSON;
   assert.deepEqual((await (await fetch(`${ctx.origin}/roster.json`)).json()).custom, []);
 });

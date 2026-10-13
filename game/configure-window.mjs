@@ -3,7 +3,8 @@ import { randomBytes } from "node:crypto";
 
 const path = process.argv[2];
 if (!path) throw new Error("usage: configure-window.mjs <BattleShip.cfg.json>");
-const config = JSON.parse(await readFile(path, "utf8"));
+// a missing or corrupt config (a game killed mid-write) starts from empty: the game fills in the rest with its defaults
+const config = await readFile(path, "utf8").then(JSON.parse, () => ({}));
 config.Window ??= {};
 config.Window.Fullscreen ??= {};
 config.Window.Fullscreen.Enabled = false;

@@ -12,11 +12,13 @@ setdef SMASH_IDLE_MIN 15
 # What an idle VM does: "suspend" (asks the Worker, which holds the cloud credentials; resumes in about 12 s) or "poweroff".
 setdef SMASH_IDLE_ACTION suspend
 # Game window / capture size (the virtual screen is the same size) and video sender tuning (kbps).
-setdef SMASH_VIDEO_W 960
-setdef SMASH_VIDEO_H 720
-setdef SMASH_VIDEO_MAX_KBPS 8000
+setdef SMASH_VIDEO_W 1120
+setdef SMASH_VIDEO_H 840
+setdef SMASH_VIDEO_MAX_KBPS 6000
 setdef SMASH_VIDEO_START_KBPS 4000
 setdef SMASH_VIDEO_MIN_KBPS 1500
+# llvmpipe rasterizer threads for the game (fewer leaves cores for the video encoders)
+setdef LP_NUM_THREADS 8
 # WebRTC media port range (open to the world in the smash-allow-webrtc-udp firewall rule).
 setdef SMASH_UDP_PORTS 50000-50099
 # Worker registration (set by scripts/cloud.sh secrets): the VM tells the Worker its room so permanent links work.
@@ -64,7 +66,7 @@ StartLimitBurst=6
 User=$U
 $ENVLINE
 EnvironmentFile=/etc/smash-online.env
-Environment=SMASH_WINDOW_X=0 SMASH_WINDOW_Y=0 LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe LP_NUM_THREADS=8 SDL_AUDIODRIVER=pulseaudio PULSE_SERVER=unix:/run/smash-pulse/native
+Environment=SMASH_WINDOW_X=0 SMASH_WINDOW_Y=0 LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe SDL_AUDIODRIVER=pulseaudio PULSE_SERVER=unix:/run/smash-pulse/native
 ExecStart=$REPO/cloud/vm/run-game.sh
 Restart=always
 RestartSec=3

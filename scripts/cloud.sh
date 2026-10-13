@@ -4,10 +4,11 @@
 #   scripts/cloud.sh down     suspend the VM (memory and disk are kept; `down --stop` powers it off instead)
 #   scripts/cloud.sh status   VM state, services, guests, idle-shutdown settings
 #   scripts/cloud.sh links    print the permanent P1 and friend URLs (links --live: the current room's links)
-#   scripts/cloud.sh secrets <gcp-key.json>   generate the permanent-link secrets and store them as Worker secrets
+#   scripts/cloud.sh secrets [gcp-key.json]   generate the permanent-link secrets and store them as Worker secrets
 #   scripts/cloud.sh sync     copy this checkout to the VM and restart the services
 #   scripts/cloud.sh newroom  restart the host page (new room, new links)
 #   scripts/cloud.sh idle <bootGraceMin> <idleMin>   change the idle-shutdown timeouts
+#   scripts/cloud.sh machine <type>   change the machine type (stops the VM; refuses while a guest is connected)
 #   scripts/cloud.sh ssh [cmd...]
 # Needs gcloud, already authenticated for the project (gcloud auth login, or activate-service-account).
 set -euo pipefail
@@ -17,7 +18,7 @@ CONF="${SMASH_CLOUD_DIR:-$HOME/.smash-online}"; mkdir -p "$CONF"; chmod 700 "$CO
 PROJECT="${SMASH_GCP_PROJECT:-smash-online-511318}"
 ZONE="${SMASH_GCP_ZONE:-me-west1-c}"
 VM="${SMASH_GCP_INSTANCE:-smash-online}"
-MACHINE="${SMASH_GCP_MACHINE:-c2d-highcpu-8}"
+MACHINE="${SMASH_GCP_MACHINE:-t2d-standard-8}"   # 8 real cores (c2d/c3 vCPUs are hyperthreads): 1120x840 holds 60 fps in a 4-player match
 ROM="${SMASH_ROM_PATH:-$HOME/Downloads/Super Smash Bros. (USA).z64}"
 KEY="${SMASH_CLOUD_KEY:-$CONF/gcp_ed25519}"
 SSH_CONF="$CONF/ssh_config"
@@ -159,24 +160,26 @@ cmd_down() {
   else say "suspended (memory and disk kept; resumes in about 12 s)"; fi
 }
 cmd_secrets() {
-  local key="${1:-}"; [[ -f "$key" ]] || { echo "usage: cloud.sh secrets <gcp-service-account-key.json>" >&2; exit 64; }
+  local key="${1:-}"
+  [[ -z "$key" || -f "$key" ]] || { echo "usage: cloud.sh secrets [gcp-service-account-key.json]" >&2; exit 64; }
+  local g; g() { node -e 'console.log(require("crypto").randomBytes(32).toString("base64url"))'; }
   if [[ ! -f "$PERM" ]]; then
-    local g; g() { node -e 'console.log(require("crypto").randomBytes(32).toString("base64url"))'; }
     ( umask 077; printf 'P1_SECRET=%s\nFRIEND_SECRET=%s\nVM_SECRET=%s\n' "$(g)" "$(g)" "$(g)" > "$PERM" )
     say "generated $PERM"
   fi
+  grep -q '^INVITE_SECRET=' "$PERM" || { ( umask 077; printf 'INVITE_SECRET=%s\n' "$(g)" >> "$PERM" ); say "added INVITE_SECRET"; }
   ( . "$PERM"
     cd "$ROOT"
-    for name in P1_SECRET FRIEND_SECRET VM_SECRET; do printf '%s' "${!name}" | npx wrangler secret put "$name" --config cloud/wrangler.toml >/dev/null; done
-    npx wrangler secret put GCP_SA_JSON --config cloud/wrangler.toml < "$key" >/dev/null )
-  say "Worker secrets stored (P1_SECRET, FRIEND_SECRET, VM_SECRET, GCP_SA_JSON)"
-  [[ "$(vm_status)" == RUNNING ]] && { write_ssh_config "$(vm_ip)"; push_vm_secret; }
-  true
+    for name in P1_SECRET FRIEND_SECRET VM_SECRET INVITE_SECRET; do printf '%s' "${!name}" | npx wrangler secret put "$name" --config cloud/wrangler.toml >/dev/null; done
+    [[ -z "$key" ]] || npx wrangler secret put GCP_SA_JSON --config cloud/wrangler.toml < "$key" >/dev/null )
+  say "Worker secrets stored"
 }
 cmd_links() {
   if [[ "${1:-}" != --live ]]; then
     [[ -r "$PERM" ]] || { echo "no permanent links yet: run scripts/cloud.sh secrets <gcp-key.json>" >&2; exit 1; }
-    ( . "$PERM"; echo "P1 (Daniel, wakes the VM): $WORKER_ORIGIN/go/$P1_SECRET"; for n in 2 3 4; do echo "P$n (friends, never wake the VM): $WORKER_ORIGIN/p/$FRIEND_SECRET/$n"; done )
+    ( . "$PERM"
+      [[ -z "${INVITE_SECRET:-}" ]] || echo "INVITE (anyone: wakes the VM, first opener is P1, then P2..P4): $WORKER_ORIGIN/join/$INVITE_SECRET"
+      echo "P1 (Daniel, wakes the VM): $WORKER_ORIGIN/go/$P1_SECRET"; for n in 2 3 4; do echo "P$n (fixed friend slot, also wakes the VM): $WORKER_ORIGIN/p/$FRIEND_SECRET/$n"; done )
     return
   fi
   local j; j="$(status_json)"; [[ -n "$j" ]] || { echo "no links (is the VM up? scripts/cloud.sh up)" >&2; exit 1; }; echo "$j" | print_links; }
@@ -197,6 +200,12 @@ case "${1:-}" in
   newroom) with_vm; vssh 'sudo systemctl restart smash-chrome' ;;
   idle) with_vm; [[ "${2:-}" =~ ^[0-9]+$ && "${3:-}" =~ ^[0-9]+$ ]] || { echo "usage: cloud.sh idle <bootGraceMin> <idleMin>" >&2; exit 64; }
         vssh "sudo sed -i -e 's/^SMASH_BOOT_GRACE_MIN=.*/SMASH_BOOT_GRACE_MIN=$2/' -e 's/^SMASH_IDLE_MIN=.*/SMASH_IDLE_MIN=$3/' /etc/smash-online.env && grep -E '^SMASH_(BOOT|IDLE)' /etc/smash-online.env" ;;
+  machine) [[ -n "${2:-}" ]] || { echo "usage: cloud.sh machine <type>" >&2; exit 64; }
+           if [[ "$(vm_status)" == RUNNING ]]; then
+             g="$(status_json | node -e 'try{console.log(JSON.parse(require("fs").readFileSync(0,"utf8")).guests)}catch{console.log(-1)}')"
+             [[ "$g" == 0 ]] || { echo "refusing: guests=$g (or unknown)" >&2; exit 1; }
+           fi
+           gci stop "$VM" --quiet >/dev/null 2>&1 || true; gci set-machine-type "$VM" --machine-type "$2" >/dev/null && say "machine type is now $2 (VM stopped; scripts/cloud.sh up starts it)" ;;
   ssh) shift; with_vm; vssh "$@" ;;
   *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 64 ;;
 esac
