@@ -297,7 +297,7 @@ function pickFighter(idx, name) {
   if (!sendMeta({ type: 'roster:pick', idx })) { gridNote.textContent = 'Not connected yet'; return; }
   grid.picked = idx;
   for (const item of grid.tiles) item.el.classList.toggle('picked', item.idx === idx);
-  gridNote.textContent = `You picked ${name} (${slotLabel.textContent}). Pick a character on the game's select screen if it is not showing yet.`;
+  gridNote.textContent = `You picked ${name} for ${slotLabel.textContent}.`;
   backToGame();
 }
 const portraitUrl = value => !value ? '' : /^[a-f0-9]{64}$/.test(value) ? `${PORTRAIT_BASE}${value}/portrait_medium.png` : (/^https:\/\//.test(value) ? value : '');
@@ -317,11 +317,11 @@ function tile(name, sub, idx, imageUrl) {
 function section(title, tiles) {
   const wrap = document.createElement('section');
   const head = document.createElement('h3');
-  head.textContent = `${title} (${tiles.length})`;
   const body = document.createElement('div');
   body.className = 'tiles';
   body.append(...tiles);
   wrap.append(head, body);
+  wrap.update = () => { const shown = tiles.filter(el => !el.hidden).length; head.textContent = `${title} (${shown})`; wrap.hidden = shown === 0; };
   return wrap;
 }
 // Built once (1058 tiles; portraits load lazily as they scroll into view); search only toggles `hidden`.
@@ -329,13 +329,13 @@ function buildGrid() {
   grid.tiles = [];
   const originals = grid.originals.map((name, i) => tile(name, 'original', -1 - TILE_FKINDS[i], ''));
   const custom = grid.custom.map(([name, base, portrait], i) => tile(name, `plays like ${base}`, i, portraitUrl(portrait)));
-  const parts = [];
-  if (originals.length) parts.push(section('Originals', originals));
-  if (custom.length) parts.push(section('Custom fighters', custom));
+  grid.sections = [];
+  if (originals.length) grid.sections.push(section('Originals', originals));
+  if (custom.length) grid.sections.push(section('Custom fighters', custom));
   const empty = document.createElement('p');
   empty.className = 'finder-hint'; empty.id = 'finder-empty'; empty.hidden = true; empty.textContent = 'No fighter matches.';
   gridBody.className = '';
-  gridBody.replaceChildren(...parts, empty);
+  gridBody.replaceChildren(...grid.sections, empty);
   for (const item of grid.tiles) item.el.classList.toggle('picked', item.idx === grid.picked);
   grid.built = true;
   filterGrid();
@@ -345,6 +345,7 @@ function filterGrid() {
   let shown = 0;
   for (const item of grid.tiles) { const hit = !query || item.name.includes(query); item.el.hidden = !hit; if (hit) shown++; }
   const empty = document.querySelector('#finder-empty');
+  for (const wrap of grid.sections || []) wrap.update();
   if (empty) empty.hidden = shown > 0 || !grid.built;
 }
 gridBody.textContent = 'Fighter list loads when the game connects…';
