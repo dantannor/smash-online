@@ -1,6 +1,6 @@
 import { Room } from "./room.js";
 import { Registry } from "./registry.js";
-import { handleWake, sweepSleepers } from "./wake.js";
+import { handleWake } from "./wake.js";
 export { Room, Registry };
 
 const PORTS = [2, 3, 4];
@@ -40,7 +40,6 @@ function withCors(request, response) {
 }
 
 export default {
-  async scheduled(event, env) { await sweepSleepers(env).catch(() => {}); },
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/api/")) {

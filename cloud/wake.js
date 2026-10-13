@@ -46,18 +46,6 @@ export const startInstance = (env) => gcp(env, "/start", { method: "POST" });
 export const resumeInstance = (env) => gcp(env, "/resume", { method: "POST" });
 export const suspendInstance = (env) => gcp(env, "/suspend", { method: "POST" });
 
-// Cron: a VM that has been suspended for a long time is slow to resume (observed 78 s click to registration after 6 h, against
-// 22 s after 33 min), so past SLEEP_STOP_MIN minutes turn the suspend into a power-off: a cold start is a steady ~30 s.
-export async function sweepSleepers(env) {
-  const instance = await getInstance(env);
-  if (instance.status !== "SUSPENDED") return "not suspended";
-  const since = Date.parse(instance.lastSuspendedTimestamp || "") || Date.now();
-  if (Date.now() - since < Number(env.SLEEP_STOP_MIN || 30) * 60_000) return "recently suspended";
-  await gcp(env, "/stop", { method: "POST" });
-  await registry(env).logWake({ action: "sweep-stop", suspendedAt: instance.lastSuspendedTimestamp });
-  return "stopped";
-}
-
 // ---- state -----------------------------------------------------------------------------------------------
 const registry = (env) => env.REGISTRY.get(env.REGISTRY.idFromName("vm"));
 const STOPPED = new Set(["TERMINATED", "STOPPED"]);
