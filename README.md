@@ -93,6 +93,24 @@ Root cause of the 78 s overnight wake: after asking the Worker to suspend it, th
 
 t2d vCPUs are real cores (c2d and c3 vCPUs are hyperthreads), which is why t2d-standard-8 beats the other 8-vCPU types here; the project's 12 vCPU quota rules out 16-vCPU types. `LP_NUM_THREADS` 4 and 6 were no better than 8. The sender is seeded at 4000 kbps with a 6000 kbps cap (about 4.5 to 5.5 Mbps per guest measured). The guest page has a **Sharpen** toggle (a convolution filter on the video) for a softer picture.
 
+**Latency** (`harness/stage/`, 2026-10-13, t2d-standard-8, 1120x840, guest on a Mac at 12 ms RTT through the Cloudflare relay, 60 trials per column; method per row in `harness/stage/README.md`). The test presses L/R on the character select (a whole-screen change) and times the first changed frame on the guest. Stages, in ms, median / p90:
+
+| Stage | Before | After | Measured with |
+|---|---|---|---|
+| Key to `dataChannel.send` | 0.0 / 0.1 | 0.0 / 0.1 | guest `performance.now()` around the send |
+| Guest to VM (data channel) | 7.5 / 56 | 7.4 / 58 | host-page receive time minus message `t`, clocks tied by 40 pings (the p90 is this Mac's Wi-Fi) |
+| Host page to sidecar to OSI1 file | 0.8 / 2.4 | 0.7 / 2.4 | `vm-probe` file change minus host-page receive (VM clock) |
+| Game: file read to new frame in Xvfb | 28.9 / 38 | 24.3 / 31 | `vm-probe` XShm grab of the screen, first changed frame minus file change |
+| Xvfb to Chrome capture | 6.2 / 16 | 10.7 / 16 | `MediaStreamTrackProcessor` on the capture track |
+| Capture to first byte at the guest (encode 2.5, pacer, network) | 115.8 / 363 | 44.8 / 108 | guest `requestVideoFrameCallback` `receiveTime` minus capture; sender stats: 2.5 ms encode per frame, pacer delay 21 ms per packet before and 2.9 ms after |
+| Guest receive to picture (assembly, jitter buffer, decode, render) | 26.4 / 37 | 24.7 / 38 | rVFC callback minus `receiveTime`; decode is 0.5 ms |
+| **Total (instrumented run)** | **200.6 / 450** | **113.0 / 197** | guest clock only |
+| **Total (light run, nothing hooked, 2 x 60 trials pooled)** | **177.8 / 205** (n=120) | **104.5 / 160** (n=120) | same test, `LIGHT=1` |
+
+The dominant stage was the WebRTC pacer: it releases queued packets at 2.5 times the bitrate, so a scene-change frame (40 to 80 KB at 5 Mbps) sat in the send queue for 60 to 100 ms, and more when the bandwidth estimate dipped. The host Chrome now starts with `--force-fieldtrials=WebRTC-Video-Pacing/factor:8.0/` (`SMASH_CHROME_EXTRA` in `/etc/smash-online.env`; set it empty to go back). Verified afterwards: 4 guests in a match at 1120x840 held 59.4 fps with 0 lost packets and 0 freezes, audio still flows, and under 15 ms +/- 10 ms jitter with 0.5% loss the playback smoothness equals the old setting (frames over 25 ms: 239 vs 207 to 220 per 45 s).
+
+Tried and not adopted: forcing the receiver playout delay to 0 (`WebRTC-ForceSendPlayoutDelay`) saves another 10 to 15 ms on a clean link but doubles the number of late frames under jitter (about 560 vs 220 per 45 s); capturing at 120 fps cut the capture stage from 11 to 4 ms but not the total (the encoder cadence absorbs it); a pacer factor of 16 was no better than 8. What remains: the game (about 24 ms, one 60 Hz frame of input sampling plus the llvmpipe render), the jitter buffer (about 25 ms) and the network. The page-flip test is the worst case for the video path; gameplay frames are about 10 KB, so ordinary moves see less of the pacer delay than this test did.
+
 **Audio.** The game plays into a PulseAudio null sink; a virtual source on its monitor is the host page's default input, sent as Opus to every guest through `getUserMedia` (Chrome cannot capture system audio on Linux). The first click or key press on a guest page turns sound on.
 
 **Services** (systemd, all restart on failure): `smash-xvfb`, `smash-pulse`, `smash-game` (restarted by systemd when the engine aborts, game back in about 4 s), `smash-sidecar` (restarted when the OSI1 file gets a new inode), `smash-server`, `smash-chrome` (host page with `?p1guest=1&audio=1`) and `smash-ctl` (room, capture, links, Worker registration, idle suspend, resume recovery).
@@ -105,11 +123,11 @@ t2d vCPUs are real cores (c2d and c3 vCPUs are hyperthreads), which is why t2d-s
 
 **First run** (VM missing) creates `smash-online` (t2d-standard-8, me-west1-c, Ubuntu 24.04, 60 GB disk), uploads your ROM (`SMASH_ROM_PATH`) to the VM only, builds the game (Release), stages the full roster and installs the services. Measured on the earlier machine type: about 8 minutes.
 
-**Tested** (4 headless browsers through the invite link, 11.6 min, 1120x840): 4 players steady 59.4 fps, 5.2 Mbps and 10 ms RTT per guest; a late joiner (P4) joined in 2 s; a guest that left and returned got its slot back in under 2 s; a reload mid-match was back in 1.3 s; with 100 ms added delay and 2% loss on the VM's egress guests held 59 fps with 22 freezes over 2 minutes; killing the game (`kill -9`) showed the menu again 4.3 s later; two matches ran to a results screen. Input to picture (guest input to the first changed video frame, character-select page flip, 14 trials) was 141 to 183 ms, median 172 ms at 10 ms RTT; the game's own input lag is about 3 frames of that, and the capture and encode path is the rest, with no cheap fix found.
+**Tested** (4 headless browsers through the invite link, 11.6 min, 1120x840): 4 players steady 59.4 fps, 5.2 Mbps and 10 ms RTT per guest; a late joiner (P4) joined in 2 s; a guest that left and returned got its slot back in under 2 s; a reload mid-match was back in 1.3 s; with 100 ms added delay and 2% loss on the VM's egress guests held 59 fps with 22 freezes over 2 minutes; killing the game (`kill -9`) showed the menu again 4.3 s later; two matches ran to a results screen. Input to picture (guest input to the first changed video frame, character-select page flip, 14 trials) was 141 to 183 ms, median 172 ms at 10 ms RTT before the pacer fix below; it is now about 105 ms (see **Latency**).
 
 **Cost** (estimates, check the billing page): t2d-standard-8 about $0.45 per hour while running; a suspended VM bills only storage for its memory image (up to about $1.5 per month for the 32 GB machine) and a stopped one nothing for compute; the 60 GB disk is a few dollars a month. Egress is the variable part: measured 4.5 to 5.5 Mbps per guest, so four guests are about 8 to 10 GB per hour, roughly $1 to $2 per hour at internet egress rates. Plan on $1.5 to $2.5 per hour for four players and $0.7 to $1 for one or two.
 
-**Limits.** The engine aborts now and then (a match in progress is lost; random menu mashing can crash it within a minute, normal play ran 11 minutes without one). Input-to-picture latency is about 170 ms. The ROM lives only on the VM disk, never in the repo, a bucket or an image. The IAP route stays unusable until the project owner enables the IAP API and grants the tunnel role.
+**Limits.** The engine aborts now and then (a match in progress is lost; random menu mashing can crash it within a minute, normal play ran 11 minutes without one). Input-to-picture latency is about 105 ms (page-flip test, 12 ms RTT; the game itself is about 24 ms of it). The ROM lives only on the VM disk, never in the repo, a bucket or an image. The IAP route stays unusable until the project owner enables the IAP API and grants the tunnel role.
 
 ## Custom fighters (opensmash roster)
 

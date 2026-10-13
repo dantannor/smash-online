@@ -17,6 +17,9 @@ setdef SMASH_VIDEO_H 840
 setdef SMASH_VIDEO_MAX_KBPS 6000
 setdef SMASH_VIDEO_START_KBPS 4000
 setdef SMASH_VIDEO_MIN_KBPS 1500
+# Extra Chrome flags for the host page. The WebRTC pacer drains the send queue at 2.5x the bitrate by default, which holds a
+# 40 to 80 KB scene-change frame back for 60 to 100 ms; factor 8 cut input-to-picture from about 177 ms to about 100 ms (harness/stage).
+setdef SMASH_CHROME_EXTRA --force-fieldtrials=WebRTC-Video-Pacing/factor:8.0/
 # llvmpipe rasterizer threads for the game (fewer leaves cores for the video encoders)
 setdef LP_NUM_THREADS 8
 # WebRTC media port range (open to the world in the smash-allow-webrtc-udp firewall rule).
@@ -112,7 +115,7 @@ ExecStart=/usr/bin/google-chrome-stable --user-data-dir=$STATE/chrome-profile --
   --remote-debugging-port=9222 --remote-debugging-address=127.0.0.1 --window-position=0,0 --window-size=\${SMASH_VIDEO_W},\${SMASH_VIDEO_H} \
   --auto-select-desktop-capture-source="Entire screen" --autoplay-policy=no-user-gesture-required \
   --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows \
-  --password-store=basic --no-sandbox \
+  --password-store=basic --no-sandbox \$SMASH_CHROME_EXTRA \
   "http://127.0.0.1:8787/host?signal=\${SMASH_SIGNAL_ORIGIN}&p1guest=1&audio=1&maxkbps=\${SMASH_VIDEO_MAX_KBPS}&startkbps=\${SMASH_VIDEO_START_KBPS}&minkbps=\${SMASH_VIDEO_MIN_KBPS}"
 Restart=always
 RestartSec=3
