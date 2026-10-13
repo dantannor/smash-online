@@ -4,7 +4,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
 BUILD_ROOT="$HOME/Projects/smash-online-build"
-GAME_DIR="$BUILD_ROOT/src/BattleShip/build-us"
+GAME_DIR="${SMASH_GAME_DIR:-$BUILD_ROOT/src/BattleShip/build-us}"   # SMASH_GAME_DIR: another build dir (crash-soak.sh uses it for debug builds)
 export OPENSMASH_LAUNCHER_INPUT="${OPENSMASH_LAUNCHER_INPUT:?}"
 export SSB64_BOOT_SLOTS=hhhh
 export SSB64_BOOT_BATTLE=-1,-1,4,0,-1,-1
