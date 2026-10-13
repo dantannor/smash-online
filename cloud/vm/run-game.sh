@@ -22,7 +22,7 @@ export SSB64_ROSTER_PICK_FILE="$(dirname "$OPENSMASH_LAUNCHER_INPUT")/roster-pic
 export SMASH_AUDIO_BACKEND=sdl
 export SMASH_WINDOW_W="${SMASH_VIDEO_W:-640}" SMASH_WINDOW_H="${SMASH_VIDEO_H:-480}"
 # the game writes its config on first run; from the next start on, force the small windowed layout
-[[ -f "$GAME_DIR/BattleShip.cfg.json" ]] && node "$ROOT/game/configure-window.mjs" "$GAME_DIR/BattleShip.cfg.json"
+node "$ROOT/game/configure-window.mjs" "$GAME_DIR/BattleShip.cfg.json"
 node "$ROOT/game/init-input.mjs" >/dev/null   # writes the OSI1 file in place when it exists (the game reads it through an open fd)
 # diagnostic, on by default when built (SMASH_FPS_LOG=0 turns it off): preloads cloud/vm/fps-probe.c (build: gcc -shared -fPIC -o ~/.smash-online/fps-probe.so cloud/vm/fps-probe.c -ldl); it appends the real swap rate to /tmp/fps.log
 [[ "${SMASH_FPS_LOG:-1}" != 0 && -f "$HOME/.smash-online/fps-probe.so" ]] && export LD_PRELOAD="$HOME/.smash-online/fps-probe.so"
