@@ -267,3 +267,23 @@ test("roster:solo writes '<seq> <10 + player> <connected mask> <cpus>' and valid
   sidecar.requestSolo(9, 1, host); sidecar.requestSolo(1, 0, host); sidecar.requestSolo(1, 4, host);
   assert.equal(host.messages.filter((m) => m.code === "invalid_solo").length, 3);
 });
+
+test("a first guest arriving after an idle spell writes the intro request; a second guest or a quick return does not", (t) => {
+  const { file } = fixture(t);
+  const pickFile = file + ".pick";
+  let clock = 1_000_000;
+  const sidecar = new Sidecar({ file, rosterPickFile: pickFile, introIdleMs: 60_000, now: () => clock }).start();
+  t.after(() => sidecar.close());
+  const host = client();
+  clock += 5_000;
+  sidecar.connect(2, "a", host); // only 5 s since the sidecar started: no request
+  assert.equal(fs.existsSync(pickFile), false);
+  sidecar.disconnect(2, "a", host);
+  clock += 120_000;
+  sidecar.connect(2, "b", host);
+  assert.deepEqual(fs.readFileSync(pickFile, "utf8").trim().split(" ").slice(1), ["20", "0", "0"]);
+  fs.rmSync(pickFile);
+  clock += 120_000;
+  sidecar.connect(3, "c", host); // someone is already connected: never
+  assert.equal(fs.existsSync(pickFile), false);
+});

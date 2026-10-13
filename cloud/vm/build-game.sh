@@ -47,6 +47,12 @@ if [[ ! -f "$BS/decomp/.smash-online-solo-hook-applied" ]]; then
   git -C "$BS/decomp" apply "$(dirname "$0")/solo-hook.patch"
   : > "$BS/decomp/.smash-online-solo-hook-applied"
 fi
+# Intro for an idle game (intro-hook.patch): guest requests made during the opening or title jump to the VS character select, and a
+# first guest arriving in an idle game restarts the opening. Applies on top of the two patches above.
+if [[ ! -f "$BS/decomp/.smash-online-intro-hook-applied" ]]; then
+  git -C "$BS/decomp" apply "$(dirname "$0")/intro-hook.patch"
+  : > "$BS/decomp/.smash-online-intro-hook-applied"
+fi
 VENV="$BUILD_ROOT/venv"
 [[ -x "$VENV/bin/python" ]] || { python3 -m venv "$VENV"; "$VENV/bin/pip" install -q Pillow; }
 cmake -S "$BS" -B "$BS/build-us" -GNinja -DCMAKE_BUILD_TYPE=Release -DSSB64_VERSION=us -DSSB64_BASEROM="$ROM" -DPython3_EXECUTABLE="$VENV/bin/python"

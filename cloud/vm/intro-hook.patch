@@ -1,0 +1,153 @@
+--- a/src/ft/ftport.c
++++ b/src/ft/ftport.c
+@@ -1689,8 +1689,17 @@
+ #ifndef __EMSCRIPTEN__
+ /* Native shell hook: SSB64_ROSTER_PICK_FILE holds "<seq> <player 0-3> <idx>": idx >= 0 is registry row idx (a custom fighter),
+  * idx < 0 is the original on tile fkind (-1 - idx). A new seq is a request to put that fighter on that player. Like the page
+- * file, the seq present at start is consumed so a stale request never replays. */
+-s32 port_roster_take_pick(s32 *player, s32 *page, s32 *tile_fkind)
++ * file, the seq present at start is consumed so a stale request never replays. "<seq> <10 + player> <connected mask> <cpu count>"
++ * is Play vs CPU; "<seq> 20 0 0" restarts the intro for a first guest arriving in an idle game.
++ *
++ * port_solo_poll() reads the file every frame from the controller read, whatever scene is running, so a request made while the
++ * intro or title plays is not lost: it jumps to the VS character select, where port_roster_take_pick() hands it to the select
++ * screen. Requests that arrive in any other scene (a match, results, menus) are dropped, as before. */
++static struct { int valid, pl, idx, extra; } sPendReq;
++extern s32 portSCManagerSceneClass(void);
++extern void portSCManagerRequestJump(s32 to_css);
++
++void port_solo_poll(s32 start_tapped)
+ {
+     static int fd = -1;
+     static long lastSeq = -1;
+@@ -1699,21 +1708,49 @@
+     ssize_t n;
+     long seq;
+     int pl, idx, extra = 0;
++    s32 cls = portSCManagerSceneClass(); /* 1 intro movies, 2 title/attract, 3 VS character select, 4 other menus, 0 everything else */
+     if (fd < 0)
+     {
+         const char *path = getenv("SSB64_ROSTER_PICK_FILE");
+-        if (path == NULL || (poll++ % 30) != 0) return 0;
+-        fd = open(path, O_RDONLY);
+-        if (fd < 0) return 0;
++        if (path != NULL && (poll++ % 30) == 0) fd = open(path, O_RDONLY);
++    }
++    if (fd >= 0 && (n = pread(fd, buf, sizeof buf - 1, 0)) > 0)
++    {
++        buf[n] = '\0';
++        if (sscanf(buf, "%ld %d %d %d", &seq, &pl, &idx, &extra) >= 3)
++        {
++            if (lastSeq < 0) lastSeq = seq;
++            else if (seq != lastSeq)
++            {
++                extern void port_log(const char *fmt, ...);
++                lastSeq = seq;
++                if (pl == 20)
++                {
++                    port_log("SOLO: intro request in scene class %d%s\n", (int)cls, (cls == 2 || cls == 3 || cls == 4) ? " -> opening" : " (ignored)");
++                    if (cls == 2 || cls == 3 || cls == 4) portSCManagerRequestJump(0);
++                }
++                else
++                {
++                    sPendReq.valid = 1; sPendReq.pl = pl; sPendReq.idx = idx; sPendReq.extra = extra;
++                    port_log("SOLO: request player=%d idx=%d in scene class %d\n", pl, idx, (int)cls);
++                }
++            }
++        }
+     }
+-    n = pread(fd, buf, sizeof buf - 1, 0);
+-    if (n <= 0) return 0;
+-    buf[n] = '\0';
+-    if (sscanf(buf, "%ld %d %d %d", &seq, &pl, &idx, &extra) < 3) return 0;
+-    if (lastSeq < 0) { lastSeq = seq; return 0; }
+-    if (seq == lastSeq) return 0;
+-    lastSeq = seq;
+-    /* "<seq> <10 + player> <mask of connected ports> <cpu count>": start a match for that player against CPUs (Play vs CPU) */
++    if (sPendReq.valid)
++    {
++        if (cls == 1 || cls == 2) portSCManagerRequestJump(1);
++        else if (cls != 3) sPendReq.valid = 0;
++    }
++    else if (start_tapped && (cls == 1 || cls == 2)) portSCManagerRequestJump(1);
++}
++
++s32 port_roster_take_pick(s32 *player, s32 *page, s32 *tile_fkind)
++{
++    int pl, idx, extra;
++    if (!sPendReq.valid) return 0;
++    sPendReq.valid = 0;
++    pl = sPendReq.pl; idx = sPendReq.idx; extra = sPendReq.extra;
+     if (pl >= 10 && pl <= 13) { *player = pl - 10; *page = idx; *tile_fkind = extra; return 2; }
+     port_roster_parse();
+     if (pl < 0 || pl > 3) return 0;
+--- a/src/mn/mnplayers/mnplayersvs.c
++++ b/src/mn/mnplayers/mnplayersvs.c
+@@ -5507,7 +5507,7 @@
+ 		/* Smash Online host: put a chosen fighter on a chosen player (the web fighter grid), the same path the pin drop uses */
+ 		extern s32 port_roster_take_pick(s32 *player, s32 *page, s32 *tile_fkind);
+ 		s32 pl, pg, fk;
+-		s32 taken = port_roster_take_pick(&pl, &pg, &fk);
++		s32 taken = (sMNPlayersVSTotalTimeTics < 15) ? 0 : port_roster_take_pick(&pl, &pg, &fk);
+ 		if (taken == 2)
+ 		{
+ 			mnPlayersVSPortSolo(pl, pg, fk);
+--- a/src/sc/scmanager.c
++++ b/src/sc/scmanager.c
+@@ -2228,6 +2228,35 @@
+ 	syTaskmanSetLoadScene();
+ }
+ 
++/* Smash Online: scene class for the idle-game logic in ftport.c (port_solo_poll): 1 intro movies, 2 title and attract demo,
++ * 3 VS character select, 4 other menus, 0 anything else (matches, results, 1P). Only classes 1 to 4 may ever be left by a guest request. */
++s32 portSCManagerSceneClass(void)
++{
++	s32 s = gSCManagerSceneData.scene_curr;
++	if (s == nSCKindPlayersVS) return 3;
++	if (s >= nSCKindOpeningRoom && s <= nSCKindOpeningNewcomers) return 1;
++#if defined(REGION_US)
++	if (s == nSCKindStartup) return 1;
++#endif
++	if (s == nSCKindTitle || s == nSCKindAutoDemo) return 2;
++	if (s == nSCKindModeSelect || s == nSCKindVSMode || s == nSCKindVSOptions) return 4;
++	return 0;
++}
++
++/* Jump to the opening (to_css == 0) or the VS character select, the same way the console reset does (sticky target, audio
++ * wind-down, task manager ends the scene at the frame boundary). */
++void portSCManagerRequestJump(s32 to_css)
++{
++	extern void func_800266A0_272A0(void);
++	if (gSCManagerSceneData.scene_curr == nSCKindAutoDemo) gSCManagerSceneData.is_reset = TRUE; /* leave the demo match like a reset does */
++	sPortResetTarget = to_css ? nSCKindPlayersVS : nSCKindOpeningRoom;
++	sPortResetPending = TRUE;
++	func_800266A0_272A0();
++	gSCManagerSceneData.scene_prev = sPortResetTarget;
++	gSCManagerSceneData.scene_curr = sPortResetTarget;
++	syTaskmanSetLoadScene();
++}
++
+ /* If a reset is pending: re-apply the target scene (undoing any scene_curr
+  * writes a nested manager made since the request), clear the pending flag,
+  * and return TRUE so nested managers know to unwind to scManagerRunLoop. */
+--- a/src/sys/controller.c
++++ b/src/sys/controller.c
+@@ -244,6 +244,18 @@
+             sSYControllerDescs[i].unk08 |= sSYControllerDescs[i].unk06;
+         }
+     }
++#ifdef PORT
++    {
++        /* Smash Online: guest requests while the intro or title plays (see port_solo_poll in ftport.c) */
++        extern void port_solo_poll(s32 start_tapped);
++        s32 start_tapped = FALSE;
++        for (i = 0; i != MAXCONTROLLERS; i++)
++        {
++            if ((sSYControllerDescs[i].unk1C == 0) && (sSYControllerDescs[i].unk02 & 0x1000)) start_tapped = TRUE;
++        }
++        port_solo_poll(start_tapped);
++    }
++#endif
+     sSYControllerIsUpdateData = TRUE;
+ }
+ 

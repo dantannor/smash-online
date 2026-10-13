@@ -7,15 +7,18 @@ import { WebSocketServer } from "ws";
 import { encodeOSI1, KINDS, clampInputMessage } from "../shared/protocol.js";
 
 const REFRESH_MS = 100;
+const INTRO_IDLE_MS = 60_000; // nobody connected this long = the game is idle
 const DEFAULT_TIMEOUT_MS = 500; // class default (contract); the CLI passes a longer one, see --input-timeout-ms
 const neutral = () => ({ kind: KINDS.DISCONNECTED, enabled: 0, buttons: 0, sx: 0, sy: 0 });
 
 export class Sidecar {
-  constructor({ file, p1 = "keyboard", mute = false, inputTimeoutMs = DEFAULT_TIMEOUT_MS, rosterPageFile = null, rosterPickFile = null, now = Date.now, onError = console.error }) {
+  constructor({ file, p1 = "keyboard", mute = false, inputTimeoutMs = DEFAULT_TIMEOUT_MS, rosterPageFile = null, rosterPickFile = null, introIdleMs = INTRO_IDLE_MS, now = Date.now, onError = console.error }) {
     if (!file) throw new TypeError("an OSI1 file path is required");
     this.file = path.resolve(file);
     this.now = now;
     this.rosterPickFile = rosterPickFile;
+    this.introIdleMs = introIdleMs;
+    this.lastOccupiedAt = now(); // last time any guest was connected; a guest arriving after introIdleMs of nobody restarts the game's intro
     this.rosterPageFile = rosterPageFile; // character-select page jumps for the native game (see cloud/vm/roster-page.patch)
     this.timeoutMs = inputTimeoutMs; // silence longer than this neutralizes a guest; shorter stalls hold the last input
     this.onError = onError;
@@ -49,6 +52,7 @@ export class Sidecar {
     if (fs.fstatSync(this.fd).size !== 80) fs.ftruncateSync(this.fd, 80);
     this.writeSnapshot();
     this.timer = setInterval(() => {
+      if (this.connections.some(Boolean)) this.lastOccupiedAt = this.now();
       this.writeSnapshot();
     }, REFRESH_MS);
     this.timer.unref?.();
@@ -59,6 +63,9 @@ export class Sidecar {
     const index = port - 1;
     if (!validPort(port) || !validConnectionId(connectionId)) return this.reject(client, "invalid_slot", "port or connectionId is invalid");
     // A replacement owns the port immediately; old IDs become stale.
+    // First guest into an idle game (nobody for a while): ask the game to restart its intro. The game only does so from the title,
+    // attract demo or menus (never in a match), and never when another guest is already connected.
+    if (!this.connections.some(Boolean) && this.now() - this.lastOccupiedAt >= this.introIdleMs) this.requestIntro();
     clearTimeout(this.connections[index]?.timeout);
     const connection = { id: connectionId, lastSeq: null, lastInputAt: this.now(), client, timeout: null };
     this.connections[index] = connection;
@@ -123,6 +130,13 @@ export class Sidecar {
     if (!this.rosterPickFile) return this.reject(client, "roster_unavailable", "this sidecar has no roster pick file");
     if (!validPort(port) || !Number.isInteger(idx) || idx < -12 || idx > 4095) return this.reject(client, "invalid_pick", "bad port or fighter");
     try { fs.writeFileSync(this.rosterPickFile, `${Date.now()} ${port - 1} ${idx}\n`); }
+    catch (error) { this.onError(error); }
+  }
+
+  // "<seq> 20 0 0": restart the intro (see cloud/vm/intro-hook.patch).
+  requestIntro() {
+    if (!this.rosterPickFile) return;
+    try { fs.writeFileSync(this.rosterPickFile, `${Date.now()} 20 0 0\n`); }
     catch (error) { this.onError(error); }
   }
 
