@@ -39,6 +39,10 @@ function handleMeta(port, raw) {
     sendSidecar({ type: "roster:pick", port, idx: message.idx });
     return;
   }
+  if (message?.type === "roster:solo" && Number.isInteger(message.cpus) && message.cpus >= 1 && message.cpus <= 3) {
+    sendSidecar({ type: "roster:solo", port, cpus: message.cpus });
+    return;
+  }
   if (message?.type === "roster:page" && Number.isInteger(message.page) && message.page >= 0 && message.page < 4096) {
     lastRosterPage = message.page;
     sendSidecar({ type: "roster:page", page: message.page });

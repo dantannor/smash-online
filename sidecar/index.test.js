@@ -253,3 +253,17 @@ test("roster:pick writes '<seq> <player> <idx>' for a custom fighter or an origi
   sidecar.requestRosterPick(9, 1, host); sidecar.requestRosterPick(1, 5000, host); sidecar.requestRosterPick(1, 1.5, host);
   assert.equal(host.messages.filter((m) => m.code === "invalid_pick").length, 3);
 });
+
+test("roster:solo writes '<seq> <10 + player> <connected mask> <cpus>' and validates input", (t) => {
+  const { file } = fixture(t);
+  const pickFile = file + ".pick";
+  const sidecar = new Sidecar({ file, rosterPickFile: pickFile }).start();
+  t.after(() => sidecar.close());
+  const host = client();
+  sidecar.requestSolo(1, 2, host);
+  assert.deepEqual(fs.readFileSync(pickFile, "utf8").trim().split(" ").slice(1), ["10", "1", "2"]);
+  sidecar.requestSolo(3, 3, host);
+  assert.deepEqual(fs.readFileSync(pickFile, "utf8").trim().split(" ").slice(1), ["12", "4", "3"]);
+  sidecar.requestSolo(9, 1, host); sidecar.requestSolo(1, 0, host); sidecar.requestSolo(1, 4, host);
+  assert.equal(host.messages.filter((m) => m.code === "invalid_solo").length, 3);
+});

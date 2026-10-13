@@ -223,13 +223,19 @@ async function readStats() {
   } catch { /* stats are diagnostic only */ }
 }
 const GAME_CODES = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space']);
+// The page scrolls (video on top, fighter grid below), so the game only owns the keys while focus is not on the search box or a
+// fighter tile (there arrows, space and Enter keep their normal meaning). Picking a fighter, or any button click, drops focus.
+const typingOrGrid = event => typingTarget(event) || (event.target instanceof Element && event.target.closest('#fighter-grid') !== null);
 window.addEventListener('keydown', event => {
-  if (typingTarget(event)) return; // the fighter search box must not drive the game
+  if (typingOrGrid(event)) return;
   if (event.metaKey || event.ctrlKey || event.altKey) return; // browser shortcuts: their keyups never arrive
-  if (GAME_CODES.has(event.code)) event.preventDefault();
+  if (GAME_CODES.has(event.code)) event.preventDefault(); // no page scroll while playing
   keyState.add(event.code); sendInput();
 });
-window.addEventListener('keyup', event => { if (typingTarget(event)) return; keyState.delete(event.code); sendInput(); });
+window.addEventListener('keyup', event => { if (typingOrGrid(event)) return; keyState.delete(event.code); sendInput(); });
+// Moving focus into the search box or the grid must not leave a held key stuck in the game.
+document.addEventListener('focusin', event => { if (typingOrGrid(event) && keyState.size) { keyState.clear(); sendInput(true); } });
+document.addEventListener('click', event => { if (event.target instanceof Element && event.target.closest('button.action')) event.target.closest('button.action').blur(); });
 document.addEventListener('visibilitychange', () => { if (document.hidden) { keyState.clear(); sendInput(true); } else void ensurePlaying(); });
 window.addEventListener('blur', () => { keyState.clear(); sendInput(true); });
 window.addEventListener('gamepadconnected', () => sendInput(true));
@@ -255,7 +261,7 @@ async function toggleFullscreen() {
 }
 fullscreenButton.addEventListener('click', () => { void ensurePlaying(); toggleFullscreen(); });
 for (const type of ['fullscreenchange', 'webkitfullscreenchange']) document.addEventListener(type, () => { fullscreenButton.textContent = fullscreenElement() ? 'Exit fullscreen (Esc)' : 'Fullscreen (F)'; });
-window.addEventListener('keydown', event => { if (event.code === 'KeyF' && !typingTarget(event) && !event.repeat && !event.metaKey && !event.ctrlKey && !event.altKey) toggleFullscreen(); });
+window.addEventListener('keydown', event => { if (event.code === 'KeyF' && !typingOrGrid(event) && !event.repeat && !event.metaKey && !event.ctrlKey && !event.altKey) toggleFullscreen(); });
 setInterval(() => sendInput(true), 1000 / 60);
 window.__smashGuest = { state, ensurePlaying, stats: async () => ({ ...state, rtcStats: peer ? [...(await peer.getStats()).values()] : [] }), get lastInput() { return { ...lastInput }; }, setVirtualInput };
 if (params.get('fakeInput') === 'script') {
@@ -264,47 +270,48 @@ if (params.get('fakeInput') === 'script') {
 connect();
 
 // ---- fighter grid ---------------------------------------------------------------------------------------------
-// Like smash.fun: every fighter on one scrollable screen with search. The host sends the roster over a reliable "meta" channel
-// (originals as name tiles, custom fighters with smash.fun's public portrait assets); a click asks the host to put that fighter
-// on THIS player's port in the game's character select (host page -> sidecar -> file the game polls).
+// Like smash.fun: every fighter on the same scrolling page, under the video, with search. The host sends the roster over a reliable
+// "meta" channel (originals as name tiles, custom fighters with smash.fun's public portrait assets); a click asks the host to put that
+// fighter on THIS player's port in the game's character select (host page -> sidecar -> file the game polls).
 const TILE_FKINDS = [4, 0, 2, 5, 3, 7, 11, 6, 8, 1, 9, 10]; // original on character-select tile i (left to right, top row first) -> game fighter kind
 const PORTRAIT_BASE = 'https://storage.googleapis.com/smash-the-weights-fighter-assets/baked/v1/objects/';
-const grid = { originals: [], custom: [], page: 1, pages: 1, picked: null };
-const gridEl = document.querySelector('#finder');
-const gridBody = document.querySelector('#finder-results');
+const grid = { originals: [], custom: [], page: 1, pages: 1, picked: null, tiles: [], built: false };
+const gridBody = document.querySelector('#fighter-grid');
 const gridSearch = document.querySelector('#finder-search');
 const gridNote = document.querySelector('#finder-page');
-function typingTarget(event) { return event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement; }
+function typingTarget(event) { return event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement; }
 function attachMeta(channel) {
   metaChannel = channel;
   channel.onmessage = ({ data }) => {
     let message;
     try { message = JSON.parse(data); } catch { return; }
-    if (message.type === 'roster:begin') { grid.originals = message.originals || []; grid.custom = []; grid.pages = message.pages || 1; grid.page = message.page ?? 1; }
+    if (message.type === 'roster:begin') { grid.originals = message.originals || []; grid.custom = []; grid.pages = message.pages || 1; grid.page = message.page ?? 1; grid.built = false; }
     else if (message.type === 'roster:chunk') { for (const item of message.items || []) grid.custom.push(item); }
-    else if (message.type === 'roster:end') grid.ready = true;
+    else if (message.type === 'roster:end') buildGrid();
     else if (message.type === 'roster:page') grid.page = message.page;
-    if (!gridEl.hidden) renderGrid();
   };
 }
 function sendMeta(value) { if (metaChannel?.readyState === 'open') { metaChannel.send(JSON.stringify(value)); return true; } return false; }
+function backToGame() { window.scrollTo({ top: 0, behavior: 'smooth' }); document.activeElement?.blur?.(); }
 function pickFighter(idx, name) {
   if (!sendMeta({ type: 'roster:pick', idx })) { gridNote.textContent = 'Not connected yet'; return; }
   grid.picked = idx;
-  gridNote.textContent = `Picked ${name} for ${slotLabel.textContent}. Close this to see the game.`;
-  renderGrid();
+  for (const item of grid.tiles) item.el.classList.toggle('picked', item.idx === idx);
+  gridNote.textContent = `You picked ${name} (${slotLabel.textContent}). Pick a character on the game's select screen if it is not showing yet.`;
+  backToGame();
 }
 const portraitUrl = value => !value ? '' : /^[a-f0-9]{64}$/.test(value) ? `${PORTRAIT_BASE}${value}/portrait_medium.png` : (/^https:\/\//.test(value) ? value : '');
 function tile(name, sub, idx, imageUrl) {
   const button = document.createElement('button');
   button.type = 'button';
-  button.className = `tile${grid.picked === idx ? ' picked' : ''}${imageUrl ? '' : ' nameonly'}`;
+  button.className = `tile${imageUrl ? '' : ' nameonly'}`;
   button.title = `${name}${sub ? ` (${sub})` : ''}`;
   if (imageUrl) { const img = document.createElement('img'); img.loading = 'lazy'; img.decoding = 'async'; img.alt = ''; img.src = imageUrl; button.append(img); }
   const label = document.createElement('span');
   label.textContent = name;
   button.append(label);
   button.addEventListener('click', () => pickFighter(idx, name));
+  grid.tiles.push({ el: button, idx, name: name.toLowerCase() });
   return button;
 }
 function section(title, tiles) {
@@ -317,22 +324,42 @@ function section(title, tiles) {
   wrap.append(head, body);
   return wrap;
 }
-function renderGrid() {
-  const query = gridSearch.value.trim().toLowerCase();
-  const hit = name => !query || name.toLowerCase().includes(query);
-  const originals = grid.originals.map((name, i) => [name, -1 - TILE_FKINDS[i]]).filter(([name]) => hit(name)).map(([name, idx]) => tile(name, 'original', idx, ''));
-  const custom = [];
-  for (let i = 0; i < grid.custom.length; i++) { const [name, base, portrait] = grid.custom[i]; if (hit(name)) custom.push(tile(name, `plays like ${base}`, i, portraitUrl(portrait))); }
+// Built once (1058 tiles; portraits load lazily as they scroll into view); search only toggles `hidden`.
+function buildGrid() {
+  grid.tiles = [];
+  const originals = grid.originals.map((name, i) => tile(name, 'original', -1 - TILE_FKINDS[i], ''));
+  const custom = grid.custom.map(([name, base, portrait], i) => tile(name, `plays like ${base}`, i, portraitUrl(portrait)));
   const parts = [];
   if (originals.length) parts.push(section('Originals', originals));
   if (custom.length) parts.push(section('Custom fighters', custom));
-  if (!parts.length) { const p = document.createElement('p'); p.className = 'finder-hint'; p.textContent = grid.originals.length || grid.custom.length ? 'No fighter matches.' : 'Fighter list not available yet.'; parts.push(p); }
-  gridBody.replaceChildren(...parts);
+  const empty = document.createElement('p');
+  empty.className = 'finder-hint'; empty.id = 'finder-empty'; empty.hidden = true; empty.textContent = 'No fighter matches.';
+  gridBody.className = '';
+  gridBody.replaceChildren(...parts, empty);
+  for (const item of grid.tiles) item.el.classList.toggle('picked', item.idx === grid.picked);
+  grid.built = true;
+  filterGrid();
 }
-document.querySelector('#fighters').addEventListener('click', () => { gridEl.hidden = !gridEl.hidden; if (!gridEl.hidden) { renderGrid(); gridSearch.focus(); } });
-document.querySelector('#finder-close').addEventListener('click', () => { gridEl.hidden = true; });
-gridSearch.addEventListener('input', renderGrid);
-gridSearch.addEventListener('keydown', event => { if (event.key === 'Escape') { gridEl.hidden = true; gridSearch.blur(); } });
+function filterGrid() {
+  const query = gridSearch.value.trim().toLowerCase();
+  let shown = 0;
+  for (const item of grid.tiles) { const hit = !query || item.name.includes(query); item.el.hidden = !hit; if (hit) shown++; }
+  const empty = document.querySelector('#finder-empty');
+  if (empty) empty.hidden = shown > 0 || !grid.built;
+}
+gridBody.textContent = 'Fighter list loads when the game connects…';
+gridBody.className = 'finder-hint';
+gridSearch.addEventListener('input', filterGrid);
+gridSearch.addEventListener('keydown', event => { if (event.key === 'Escape') gridSearch.blur(); });
+
+// Play vs CPU: from this guest's own link, start a match alone. The game gives this player a fighter if none is picked, fills the
+// ports with no connected guest with CPUs (originals) and starts as if Start was pressed.
+document.querySelector('#solo').addEventListener('click', () => {
+  const cpus = Number(document.querySelector('#solo-cpus').value);
+  if (!sendMeta({ type: 'roster:solo', cpus })) { gridNote.textContent = 'Not connected yet'; return; }
+  gridNote.textContent = `Starting a match against ${cpus} CPU${cpus > 1 ? 's' : ''}…`;
+  backToGame();
+});
 
 // Optional guest-side sharpening for a soft (low bitrate or upscaled) picture; remembered per browser.
 const sharpenButton = document.querySelector('#sharpen');
