@@ -192,7 +192,7 @@ async function runScenario(t) {
     const reports = path.join(root, "harness/reports");
     await mkdir(reports, { recursive: true });
     await writeFile(path.join(reports, `e2e-${Date.now()}.json`), `${JSON.stringify(result, null, 2)}\n`);
-    if (!realMode) await writeFile(path.join(reports, "e2e-sample.json"), `${JSON.stringify(result, null, 2)}\n`);
+    if (!realMode && process.env.UPDATE_E2E_SAMPLE === "1") await writeFile(path.join(reports, "e2e-sample.json"), `${JSON.stringify(result, null, 2)}\n`);
     return result;
   } finally {
     await boundedCleanup("browser-context", context?.close());
