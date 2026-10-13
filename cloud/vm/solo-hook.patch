@@ -1,0 +1,94 @@
+--- a/src/ft/ftport.c
++++ b/src/ft/ftport.c
+@@ -1695,10 +1695,10 @@
+     static int fd = -1;
+     static long lastSeq = -1;
+     static int poll = 0;
+-    char buf[48];
++    char buf[64];
+     ssize_t n;
+     long seq;
+-    int pl, idx;
++    int pl, idx, extra = 0;
+     if (fd < 0)
+     {
+         const char *path = getenv("SSB64_ROSTER_PICK_FILE");
+@@ -1709,10 +1709,12 @@
+     n = pread(fd, buf, sizeof buf - 1, 0);
+     if (n <= 0) return 0;
+     buf[n] = '\0';
+-    if (sscanf(buf, "%ld %d %d", &seq, &pl, &idx) != 3) return 0;
++    if (sscanf(buf, "%ld %d %d %d", &seq, &pl, &idx, &extra) < 3) return 0;
+     if (lastSeq < 0) { lastSeq = seq; return 0; }
+     if (seq == lastSeq) return 0;
+     lastSeq = seq;
++    /* "<seq> <10 + player> <mask of connected ports> <cpu count>": start a match for that player against CPUs (Play vs CPU) */
++    if (pl >= 10 && pl <= 13) { *player = pl - 10; *page = idx; *tile_fkind = extra; return 2; }
+     port_roster_parse();
+     if (pl < 0 || pl > 3) return 0;
+     if (idx < 0)
+--- a/src/mn/mnplayers/mnplayersvs.c
++++ b/src/mn/mnplayers/mnplayersvs.c
+@@ -5434,6 +5434,47 @@
+ 	}
+ }
+ 
++/* Smash Online "Play vs CPU": the requesting player gets a fighter if it has none, every port that is not a connected guest (up to
++ * cpu_count of them) becomes a CPU with a random original fighter, and the match starts as if Start had been pressed. */
++static void mnPlayersVSPortSolo(s32 req, s32 connected_mask, s32 cpu_count)
++{
++	s32 i, fk, made = 0, used = 0;
++	if (sMNPlayersVSIsStart != FALSE) return;
++	if (sMNPlayersVSSlots[req].is_fighter_selected == FALSE || sMNPlayersVSSlots[req].pkind != nFTPlayerKindMan)
++	{
++		fk = syUtilsRandTimeUCharRange(nFTKindPlayableEnd + 1);
++		sMNPlayersVSSlots[req].fkind = fk;
++		sMNPlayersVSSlots[req].costume = 0;
++		sMNPlayersVSSlots[req].pkind = nFTPlayerKindMan;
++		sMNPlayersVSSlots[req].is_selected = TRUE;
++		sMNPlayersVSSlots[req].is_fighter_selected = TRUE;
++		sMNPlayersVSSlots[req].is_status_selected = FALSE;
++		mnPlayersVSMakeFighter(sMNPlayersVSSlots[req].player, req, fk, 0);
++	}
++	used |= 1 << sMNPlayersVSSlots[req].fkind;
++	for (i = 0; i < GMCOMMON_PLAYERS_MAX && made < cpu_count; i++)
++	{
++		if (i == req || ((connected_mask >> i) & 1)) continue;
++		do { fk = syUtilsRandTimeUCharRange(nFTKindPlayableEnd + 1); } while (((used >> fk) & 1) && used != ((1 << (nFTKindPlayableEnd + 1)) - 1));
++		used |= 1 << fk;
++		sMNPlayersVSSlots[i].pkind = nFTPlayerKindCom;
++		sMNPlayersVSSlots[i].fkind = fk;
++		sMNPlayersVSSlots[i].costume = mnPlayersVSGetFreeCostume(fk, i);
++		sMNPlayersVSSlots[i].cpu_level = 4;
++		sMNPlayersVSSlots[i].holder_player = GMCOMMON_PLAYERS_MAX;
++		sMNPlayersVSSlots[i].is_selected = TRUE;
++		sMNPlayersVSSlots[i].is_fighter_selected = TRUE;
++		if (sMNPlayersVSSlots[i].type_button != NULL) mnPlayersVSUpdatePlayerKindSelect(sMNPlayersVSSlots[i].type_button, i, nFTPlayerKindCom);
++		made++;
++	}
++	if (made == 0 || mnPlayersVSCheckReady() == FALSE) return;
++	func_800269C0_275C0(nSYAudioVoicePublicCheer);
++	mnPlayersVSSetIdlePlayerNotAll();
++	sMNPlayersVSStartProceedWait = 30;
++	sMNPlayersVSIsStart = TRUE;
++	mnPlayersVSPauseSlotProcesses();
++}
++
+ static void mnPlayersVSPortPageInput(void)
+ {
+ 	extern s32 port_roster_take_page_request(void);
+@@ -5462,7 +5503,13 @@
+ 		/* Smash Online host: put a chosen fighter on a chosen player (the web fighter grid), the same path the pin drop uses */
+ 		extern s32 port_roster_take_pick(s32 *player, s32 *page, s32 *tile_fkind);
+ 		s32 pl, pg, fk;
+-		if (port_roster_take_pick(&pl, &pg, &fk))
++		s32 taken = port_roster_take_pick(&pl, &pg, &fk);
++		if (taken == 2)
++		{
++			mnPlayersVSPortSolo(pl, pg, fk);
++			return;
++		}
++		if (taken)
+ 		{
+ 			port_roster_set_page(pg);
+ 			mnPlayersVSPortApplyRosterPage();

@@ -42,6 +42,11 @@ if [[ ! -f "$BS/decomp/.smash-online-roster-hooks-applied" ]]; then
   git -C "$BS/decomp" apply "$(dirname "$0")/roster-hooks.patch"
   : > "$BS/decomp/.smash-online-roster-hooks-applied"
 fi
+# Play vs CPU (guest page button): a solo-hook.patch request in the same pick file starts a match against CPUs. Applies on top of the roster hooks.
+if [[ ! -f "$BS/decomp/.smash-online-solo-hook-applied" ]]; then
+  git -C "$BS/decomp" apply "$(dirname "$0")/solo-hook.patch"
+  : > "$BS/decomp/.smash-online-solo-hook-applied"
+fi
 VENV="$BUILD_ROOT/venv"
 [[ -x "$VENV/bin/python" ]] || { python3 -m venv "$VENV"; "$VENV/bin/pip" install -q Pillow; }
 cmake -S "$BS" -B "$BS/build-us" -GNinja -DCMAKE_BUILD_TYPE=Release -DSSB64_VERSION=us -DSSB64_BASEROM="$ROM" -DPython3_EXECUTABLE="$VENV/bin/python"

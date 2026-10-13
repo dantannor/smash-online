@@ -126,6 +126,15 @@ export class Sidecar {
     catch (error) { this.onError(error); }
   }
 
+  // Play vs CPU: "<seq> <10 + player> <bitmask of connected ports> <cpu count>". The game fills the ports that are not connected with CPUs and starts the match.
+  requestSolo(port, cpus, client) {
+    if (!this.rosterPickFile) return this.reject(client, "roster_unavailable", "this sidecar has no roster pick file");
+    if (!validPort(port) || !Number.isInteger(cpus) || cpus < 1 || cpus > 3) return this.reject(client, "invalid_solo", "bad port or CPU count");
+    const mask = this.connections.reduce((bits, connection, index) => (connection ? bits | (1 << index) : bits), 1 << (port - 1));
+    try { fs.writeFileSync(this.rosterPickFile, `${Date.now()} ${9 + port} ${mask} ${cpus}\n`); }
+    catch (error) { this.onError(error); }
+  }
+
   reject(client, code, message) { client?.sendJson({ type: "error", code, message }); }
 
   setP1(input) {
@@ -210,6 +219,7 @@ export function createSidecarServer(sidecar, { port = 8765, host = "127.0.0.1" }
       else if (message.type === "slot:input") sidecar.input(message.port, message.connectionId, message.input, client);
       else if (message.type === "mute" && typeof message.value === "boolean") { sidecar.mute = message.value; sidecar.writeSnapshot(); }
       else if (message.type === "roster:pick") sidecar.requestRosterPick(message.port, message.idx, client);
+      else if (message.type === "roster:solo") sidecar.requestSolo(message.port, message.cpus, client);
       else if (message.type === "roster:page") sidecar.requestRosterPage(message.page, client);
       else if (message.type === "slot:disconnect") sidecar.disconnect(message.port, message.connectionId, client);
       else sidecar.reject(client, "unknown_type", "unsupported message type");
