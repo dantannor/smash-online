@@ -53,6 +53,39 @@
      }
      o->owner_char = sInjectCharIdx;
      o->dbg_ticks = 0;
+@@ -6670,8 +6673,10 @@
+ {
+     FTAttributes *src;      /* shared attr this clone was made from */
+     FTAttributes *attr;
++    s32 serial;             /* Smash Online: port_scene_arena_serial() when built */
+ } UIPrivAttr;
+ static UIPrivAttr sUIPrivAttrs[GMCOMMON_PLAYERS_MAX];
++extern s32 port_scene_arena_serial(void);
+ 
+ #define UI_PRIV_LUT_MAX 8
+ 
+@@ -6713,7 +6718,12 @@
+         return;
+     }
+     pv = &sUIPrivAttrs[fp->player];
+-    if (pv->attr != NULL && pv->src == src)
++    /* Smash Online: reuse the clone only within the scene that built it. Every scene init clears the struct-fixup marks
++     * (lbRelocInitSetup -> portResetStructFixups), so in a later scene the cached, already-native clone sprites were fixed up
++     * a second time: nbitmaps and ndisplist swapped and portFixupBitmapArray wrote past the cloned bitmap array (heap
++     * corruption, then SIGSEGV anywhere; found with ASan under menu mashing). A new scene rebuilds from the fresh file data;
++     * the old clone is leaked like the other-fkind case below. */
++    if (pv->attr != NULL && pv->src == src && pv->serial == port_scene_arena_serial())
+     {
+         fp->attr = pv->attr;
+         return;
+@@ -6764,6 +6774,7 @@
+      * HUD SObjs made from it may still be alive this scene */
+     pv->src = src;
+     pv->attr = attr;
++    pv->serial = port_scene_arena_serial();
+     fp->attr = attr;
+     port_log("OSBUI: private HUD sprites for player %d (fkind %d)\n",
+              (int)fp->player, (int)fp->fkind);
 --- a/src/sys/taskman.c
 +++ b/src/sys/taskman.c
 @@ -33,6 +33,14 @@

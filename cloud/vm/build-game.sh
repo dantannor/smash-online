@@ -60,12 +60,14 @@ if [[ ! -f "$BS/decomp/.smash-online-opening-vanilla-applied" ]]; then
   git -C "$BS/decomp" apply "$HERE/opening-vanilla.patch"
   : > "$BS/decomp/.smash-online-opening-vanilla-applied"
 fi
-# Custom-fighter mesh owner (osb5-owner-serial.patch): the saved owner GObj counted as alive whenever the scene KIND matched, so
-# character select -> stage select -> character select dereferenced a recycled arena (SIGSEGV in osb5_release_owner under menu
-# mashing). A per-recycle arena serial replaces the kind. Applies on top of the patches above.
-if [[ ! -f "$BS/decomp/.smash-online-osb5-owner-serial-applied" ]]; then
-  git -C "$BS/decomp" apply "$HERE/osb5-owner-serial.patch"
-  : > "$BS/decomp/.smash-online-osb5-owner-serial-applied"
+# Scene arena serial (arena-serial.patch): two caches of custom-fighter state treated anything from an earlier scene as still valid.
+# The mesh owner check compared scene KINDS, so character select -> stage select -> character select dereferenced a recycled arena
+# (SIGSEGV in osb5_release_owner), and the per-player HUD sprite clones were fixed up a second time in a later scene (every scene
+# init clears the fixup marks), which wrote past their bitmap arrays and corrupted the heap. Both now key on a counter that bumps on
+# every arena recycle. Applies on top of the patches above.
+if [[ ! -f "$BS/decomp/.smash-online-arena-serial-applied" ]]; then
+  git -C "$BS/decomp" apply "$HERE/arena-serial.patch"
+  : > "$BS/decomp/.smash-online-arena-serial-applied"
 fi
 # RelocPointerTable: re-registering a live pointer reuses its slot instead of leaking one per scene change (the table aborted after a few
 # hours), plus one RELOCSTAT log line per scene change for crash-soak.sh (reloc-dedup.patch, in the BattleShip repo itself).
