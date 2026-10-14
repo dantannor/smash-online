@@ -9,6 +9,7 @@ export OPENSMASH_LAUNCHER_INPUT="${OPENSMASH_LAUNCHER_INPUT:?}"
 export SSB64_BOOT_SLOTS=hhhh
 export SSB64_BOOT_BATTLE=-1,-1,4,0,-1,-1
 export SSB64_START_SCENE=28   # nSCKindOpeningRoom: boot into the opening movie and title (16 = straight into the VS character select); the intro hook jumps to the select on a guest's first pick or Start
+export SSB64_OPENING_VANILLA=1   # the opening plays with the original fighters: custom ones on its tiles crash it (opening-vanilla.patch)
 ROSTER_DIR="${SMASH_ROSTER_DIR:-$BUILD_ROOT/roster}"
 if [[ "${SMASH_ROSTER:-custom}" != vanilla && -f "$ROSTER_DIR/roster.txt" ]]; then
   ln -sfn "$ROSTER_DIR/characters" "$GAME_DIR/characters"

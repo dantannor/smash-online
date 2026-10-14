@@ -1,0 +1,22 @@
+--- a/port/bridge/particle_bank_bridge.cpp
++++ b/port/bridge/particle_bank_bridge.cpp
+@@ -395,6 +395,7 @@
+         extern void portTextureCacheDeleteRange(const void *base, size_t size);
+         extern void portPackedDisplayListCacheDeleteRange(const void *base, size_t size);
+         extern void portEvictStructFixupsInRange(const void *begin, size_t size);
++        extern void portRelocInvalidateRange(const void *base, size_t size);
+         const std::vector<uint8_t> *bufs[2] = { &e->script_data, &e->texture_data };
+         for (const std::vector<uint8_t> *buf : bufs) {
+             if (buf->empty())
+@@ -402,6 +403,11 @@
+             portTextureCacheDeleteRange(buf->data(), buf->size());
+             portPackedDisplayListCacheDeleteRange(buf->data(), buf->size());
+             portEvictStructFixupsInRange(buf->data(), buf->size());
++            /* The bank's script and texture pointers were registered as reloc tokens (lbParticleSetupBankID). These buffers
++             * are heap vectors, outside the scene arena that port_taskman_evict_arena_caches() invalidates, so nothing else
++             * ever released those slots: every bank load leaked a few hundred of them (the table aborts at 1M after a few
++             * hours of scene changes) and the stale tokens kept resolving to the freed memory. */
++            portRelocInvalidateRange(buf->data(), buf->size());
+         }
+     }
+     sWorkingEntries.erase(

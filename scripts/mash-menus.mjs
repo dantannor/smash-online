@@ -4,7 +4,10 @@
 // character select, stage select, matches, results and back.
 // --picks N also hits the roster pick and page files (next to the OSI1 file, like the sidecar does) N times a second: random fighter
 // rows for random ports, page jumps, now and then a Play vs CPU request. --fighters is the number of registry rows (roster.txt lines).
-// usage: mash-menus.mjs [--file F] [--seconds N] [--hz N] [--seed N] [--ports 1111] [--start-bias P] [--picks N] [--fighters N]
+// --quit-every N: every N seconds the pads pause, wait about a second, hold A+B+R and tap Z: the game's quit-match combo (ifcommon.c
+// checks it only on a frame with a new press, after the pause zoom), so a run keeps cycling through
+// matches, results and the menus instead of sitting in one long match (random presses almost never end a 5-stock match).
+// usage: mash-menus.mjs [--file F] [--seconds N] [--hz N] [--seed N] [--ports 1111] [--start-bias P] [--picks N] [--fighters N] [--quit-every N]
 import { open } from "node:fs/promises";
 import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -19,6 +22,7 @@ const startBias = Number(opt("start-bias", 0.04));
 const ports = String(opt("ports", "1111"));
 const picks = Number(opt("picks", 0));
 const fighters = Number(opt("fighters", 1000));
+const quitEvery = Number(opt("quit-every", 0));
 const dir = dirname(file);
 let rng = Number(opt("seed", 1)) >>> 0 || 1;
 const rand = () => { rng ^= rng << 13; rng >>>= 0; rng ^= rng >>> 17; rng ^= rng << 5; rng >>>= 0; return rng / 4294967296; };
@@ -34,7 +38,20 @@ const request = () => {
   else if (r < 0.9) writeFileSync(join(dir, "roster-page"), `${stamp} ${Math.floor(rand() * 30)}\n`);
   else writeFileSync(join(dir, "roster-pick"), `${stamp} ${10 + Math.floor(rand() * 4)} ${Math.floor(rand() * 16)} ${1 + Math.floor(rand() * 3)}\n`);
 };
+const ABR = BUTTONS.A | BUTTONS.B | BUTTONS.R;
+const QUIT = [BUTTONS.START, ...Array(Math.ceil(hz * 1.2)).fill(0), ABR, ABR, ABR, ABR | BUTTONS.Z, ABR | BUTTONS.Z, ABR | BUTTONS.Z, 0, 0];
+let nextQuit = quitEvery > 0 ? Date.now() + quitEvery * 1000 : Infinity, quitStep = -1, quits = 0;
 while (Date.now() < end) {
+  if (quitStep < 0 && Date.now() >= nextQuit) { quitStep = 0; quits++; nextQuit = Date.now() + quitEvery * 1000; }
+  if (quitStep >= 0) {   // the quit combo on every active port, so it reaches whoever paused
+    const pads = Array.from({ length: 4 }, (_, p) => ports[p] !== "1" ? { kind: KINDS.DISCONNECTED, enabled: false, buttons: 0, sx: 0, sy: 0 }
+      : { kind: KINDS.FILE_DRIVEN_PAD, enabled: true, buttons: QUIT[quitStep], sx: 0, sy: 0 });
+    const data = encodeOSI1({ seq: seq++ & 0xff, mute: 1, ports: pads });
+    await handle.write(data, 0, data.length, 0);
+    if (++quitStep >= QUIT.length) quitStep = -1;
+    await new Promise((r) => setTimeout(r, 1000 / hz));
+    continue;
+  }
   const state = Array.from({ length: 4 }, (_, p) => {
     if (ports[p] !== "1") return { kind: KINDS.DISCONNECTED, enabled: false, buttons: 0, sx: 0, sy: 0 };
     let buttons = pool[Math.floor(rand() * pool.length)];
@@ -49,4 +66,4 @@ while (Date.now() < end) {
   await new Promise((r) => setTimeout(r, 1000 / hz));
 }
 await handle.close();
-console.log(`mash-menus: ${seq - 1} writes, ${presses} presses, ${requests} roster requests over ${seconds}s`);
+console.log(`mash-menus: ${seq - 1} writes, ${presses} presses, ${requests} roster requests, ${quits} quit combos over ${seconds}s`);

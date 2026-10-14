@@ -1,0 +1,26 @@
+--- a/src/ft/ftport.c
++++ b/src/ft/ftport.c
+@@ -1297,7 +1297,22 @@
+ static PortChar *port_char_for_opening(s32 fkind)
+ {
+     s32 player;
+-    PortChar *c = port_char_at_tile(fkind);
++    PortChar *c;
++    /* Smash Online: SSB64_OPENING_VANILLA=1 plays the opening with the original fighters. On a custom roster page each
++     * montage tile would otherwise spawn its custom fighter's base kind, which the opening scenes do not expect: the run and
++     * clash scenes load files only for their eight original kinds (a NULL main file, SIGSEGV in portFixupFTAttributes) and
++     * the cliff scene sets a Link-only demo status (SIGSEGV in ftMainUpdateHiddenPartID). */
++    static s32 sVanilla = -1;
++    if (sVanilla < 0)
++    {
++        const char *e = getenv("SSB64_OPENING_VANILLA");
++        sVanilla = (e != NULL && e[0] == '1') ? 1 : 0;
++    }
++    if (sVanilla)
++    {
++        return NULL;
++    }
++    c = port_char_at_tile(fkind);
+     if (c != NULL)
+     {
+         return c;

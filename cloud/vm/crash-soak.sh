@@ -4,6 +4,9 @@
 # down for the duration (they are started again at the end), so it refuses to run while a guest is connected.
 # usage: crash-soak.sh <seconds> [seed] [label]    env: SMASH_GAME_DIR (build dir, default build-us), SOAK_ARGS (extra masher flags)
 # Output: /tmp/soak/<label>/{game.log,crashes.txt,summary.txt}; summary.txt has the crash count and the RELOCSTAT growth.
+# Exit status is the regression check: 0 only with no crash and a flat reloc table (live slots grew by at most SOAK_RELOC_GROWTH,
+# default 2000, over the second half of the run; the leak fixed by reloc-dedup.patch added about 500 per scene change).
+# SOAK_MASH=0 soaks the idle game instead (opening, title, attract demo; the opening crash fixed by opening-vanilla.patch).
 set -u
 SECS="${1:?seconds}"; SEED="${2:-1}"; LABEL="${3:-run}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
@@ -45,3 +48,10 @@ done
   echo "reloc scene-change samples=$(grep -c RELOCSTAT "$OUT/game.log")"
   grep RELOCSTAT "$OUT/game.log" | awk 'NR%25==1' | tail -12
 } | tee "$OUT/summary.txt"
+growth="$(grep -o 'RELOCSTAT scene-change next=[0-9]* live=[0-9]*' "$OUT/game.log" | sed 's/.*live=//' \
+  | awk '{v[NR]=$1} END {if (NR < 4) print "none"; else print v[NR] - v[int(NR/2)]}')"
+if ((crashes == 0)) && [[ "$growth" != none ]] && ((growth <= ${SOAK_RELOC_GROWTH:-2000})); then
+  echo "PASS: 0 crashes, live reloc slots +$growth over the second half" | tee -a "$OUT/summary.txt"
+else
+  echo "FAIL: crashes=$crashes, live reloc slots growth over the second half=$growth" | tee -a "$OUT/summary.txt"; exit 1
+fi
