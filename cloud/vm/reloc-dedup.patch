@@ -1,0 +1,91 @@
+diff --git a/port/bridge/lbreloc_bridge.cpp b/port/bridge/lbreloc_bridge.cpp
+index c986cb1..cfddfc8 100644
+--- a/port/bridge/lbreloc_bridge.cpp
++++ b/port/bridge/lbreloc_bridge.cpp
+@@ -198,6 +198,7 @@ static void portStatusBufferEvictRange(LBFileNode *entries, s32 *p_num,
+  * arena's contents (DL widening, texture upload, struct fixup, reloc file
+  * ranges) so a stale lookup can't resolve through prior-scene state. Same
+  * eviction APIs run per-relocFile-load in port_reloc_lb_load_request. */
++extern "C" void portRelocLogStats(const char *tag);
+ extern "C" void port_taskman_evict_arena_caches(const void *base, size_t size)
+ {
+ 	if ((base == nullptr) || (size == 0)) return;
+@@ -218,6 +219,7 @@ extern "C" void port_taskman_evict_arena_caches(const void *base, size_t size)
+ 	 * eliminates the variant-1/2/3 stale-data crash family — see
+ 	 * docs/bugs/linux_stale_scene_data_family_2026-05-11.md. */
+ 	portRelocInvalidateRange(base, size);
++	portRelocLogStats("scene-change");
+ 
+ 	/* Variant 6 fix (silent particle/sprite corruption on cross-mode scene
+ 	 * transitions, e.g. Training → quit → VS with overlapping fighters):
+diff --git a/port/resource/RelocPointerTable.cpp b/port/resource/RelocPointerTable.cpp
+index 11f8e89..b1b5b93 100644
+--- a/port/resource/RelocPointerTable.cpp
++++ b/port/resource/RelocPointerTable.cpp
+@@ -3,6 +3,7 @@
+ #include <cstdlib>
+ #include <cstring>
+ #include <vector>
++#include <unordered_map>
+ #include <spdlog/spdlog.h>
+ 
+ /**
+@@ -57,6 +58,13 @@ static uint32_t  sCapacity    = 0;
+  * a small overhead per slot but the simplicity is worth it. */
+ static std::vector<uint32_t> sFreeIndices;
+ 
++/* Smash Online: live slot index by pointer. Every scene re-registers the pointers of the files that persist across scenes
++ * (fighter files in the intern buffer and the like); without this each re-registration took a fresh slot while the old
++ * one stayed live, about 500 slots per scene change, until sNextIndex passed the 1M token limit and the table aborted
++ * ("token index capacity exhausted", the engine's crash every few hours). A pointer that already has a live slot now gets
++ * that slot's token back: it resolves to the same address and dies with it in portRelocInvalidateRange. */
++static std::unordered_map<void *, uint32_t> sIndexByPtr;
++
+ static void ensureCapacity(void)
+ {
+     if (sSlots == nullptr) {
+@@ -142,6 +150,11 @@ uint32_t portRelocRegisterPointer(void *ptr)
+     }
+     ensureCapacity();
+ 
++    auto known = sIndexByPtr.find(ptr);
++    if (known != sIndexByPtr.end() && sSlots[known->second].ptr == ptr && sSlots[known->second].gen != 0) {
++        return makeToken(known->second, sSlots[known->second].gen);
++    }
++
+     uint32_t index;
+     uint32_t gen;
+     if (!sFreeIndices.empty()) {
+@@ -161,6 +174,7 @@ uint32_t portRelocRegisterPointer(void *ptr)
+         sSlots[index].gen = gen;
+     }
+     sSlots[index].ptr = ptr;
++    sIndexByPtr[ptr] = index;
+     return makeToken(index, gen);
+ }
+ 
+@@ -230,6 +244,8 @@ void portRelocInvalidateRange(const void *base, size_t size)
+         if (sSlots[i].gen == 0) continue;       /* already free */
+         uintptr_t p = reinterpret_cast<uintptr_t>(sSlots[i].ptr);
+         if (p >= lo && p < hi) {
++            auto known = sIndexByPtr.find(sSlots[i].ptr);
++            if (known != sIndexByPtr.end() && known->second == i) sIndexByPtr.erase(known);
+             sSlots[i].ptr = nullptr;
+             sSlots[i].gen = bumpSlotGeneration(sSlots[i].gen);
+             sFreeIndices.push_back(i);
+@@ -259,6 +275,15 @@ void portRelocResetPointerTable(void)
+     }
+     sNextIndex = 1;
+     sFreeIndices.clear();
++    sIndexByPtr.clear();
++}
++
++/* Smash Online: one line per scene change (from port_taskman_evict_arena_caches) so a soak can show the table stays flat. */
++void portRelocLogStats(const char *tag)
++{
++    uint32_t live = 0;
++    for (uint32_t i = 1; i < sNextIndex; ++i) if (sSlots[i].ptr != nullptr) live++;
++    spdlog::warn("RELOCSTAT {} next={} live={} free={} cap={}", tag, sNextIndex, live, (uint32_t)sFreeIndices.size(), sCapacity);
+ }
+ 
+ } /* extern "C" */

@@ -1,0 +1,114 @@
+--- a/src/ft/ftport.c
++++ b/src/ft/ftport.c
+@@ -875,11 +875,14 @@
+                              * translation is absorbed by the mapped child's
+                              * exact virtual-local -> emit ZERO translation */
+     GObj *owner;
+-    s32 owner_scene;        /* scene the owner was attached on: a scene
+-                             * change frees the whole GObj arena, so a
+-                             * cross-scene owner pointer is DEAD and must
+-                             * never be dereferenced (results-screen crash
+-                             * in osb5_release_owner) */
++    s32 owner_scene;        /* port_scene_arena_serial() when the owner was
++                             * attached: a scene change frees the whole GObj
++                             * arena, so a cross-scene owner pointer is DEAD
++                             * and must never be dereferenced (results-screen
++                             * crash in osb5_release_owner). Smash Online: the
++                             * arena serial, not the scene kind, so a return
++                             * to the same scene kind (CSS -> stage select ->
++                             * CSS) counts as a new scene too. */
+     /* GObjs are pool-allocated: after the owner despawns (match end, CSS
+      * chip move) the next fighter can reuse the same address, and a bare
+      * pointer match would blank a VANILLA fighter's joints (the broken
+@@ -939,8 +942,8 @@
+         return NULL;
+     }
+     {
+-        extern s32 port_current_scene(void);
+-        scene = port_current_scene();
++        extern s32 port_scene_arena_serial(void);
++        scene = port_scene_arena_serial();
+     }
+     for (i = 0; i < OSB5_PLAYER_SLOTS; i++)
+     {
+@@ -4431,8 +4434,8 @@
+     }
+     if (o->owner != NULL && o->owner != fp->fighter_gobj)
+     {
+-        extern s32 port_current_scene(void);
+-        if (o->owner_scene == port_current_scene())
++        extern s32 port_scene_arena_serial(void);
++        if (o->owner_scene == port_scene_arena_serial())
+         {
+             osb5_release_owner(o);
+         }
+@@ -5139,8 +5142,8 @@
+     o->owner = fp->fighter_gobj;
+     o->owner_fkind = (s32)fp->fkind;
+     {
+-        extern s32 port_current_scene(void);
+-        o->owner_scene = port_current_scene();
++        extern s32 port_scene_arena_serial(void);
++        o->owner_scene = port_scene_arena_serial();
+     }
+     o->owner_char = sInjectCharIdx;
+     o->dbg_ticks = 0;
+@@ -6670,8 +6673,10 @@
+ {
+     FTAttributes *src;      /* shared attr this clone was made from */
+     FTAttributes *attr;
++    s32 serial;             /* Smash Online: port_scene_arena_serial() when built */
+ } UIPrivAttr;
+ static UIPrivAttr sUIPrivAttrs[GMCOMMON_PLAYERS_MAX];
++extern s32 port_scene_arena_serial(void);
+ 
+ #define UI_PRIV_LUT_MAX 8
+ 
+@@ -6713,7 +6718,12 @@
+         return;
+     }
+     pv = &sUIPrivAttrs[fp->player];
+-    if (pv->attr != NULL && pv->src == src)
++    /* Smash Online: reuse the clone only within the scene that built it. Every scene init clears the struct-fixup marks
++     * (lbRelocInitSetup -> portResetStructFixups), so in a later scene the cached, already-native clone sprites were fixed up
++     * a second time: nbitmaps and ndisplist swapped and portFixupBitmapArray wrote past the cloned bitmap array (heap
++     * corruption, then SIGSEGV anywhere; found with ASan under menu mashing). A new scene rebuilds from the fresh file data;
++     * the old clone is leaked like the other-fkind case below. */
++    if (pv->attr != NULL && pv->src == src && pv->serial == port_scene_arena_serial())
+     {
+         fp->attr = pv->attr;
+         return;
+@@ -6764,6 +6774,7 @@
+      * HUD SObjs made from it may still be alive this scene */
+     pv->src = src;
+     pv->attr = attr;
++    pv->serial = port_scene_arena_serial();
+     fp->attr = attr;
+     port_log("OSBUI: private HUD sprites for player %d (fkind %d)\n",
+              (int)fp->player, (int)fp->fkind);
+--- a/src/sys/taskman.c
++++ b/src/sys/taskman.c
+@@ -33,6 +33,14 @@
+ _Static_assert(sizeof(uintptr_t) == 8 || sizeof(uintptr_t) == 4,
+                "PORT build requires 32- or 64-bit uintptr_t");
+ 
++/* Smash Online: counts scene arena recycles. A pointer into the arena saved in one scene is dead in every later one, even a later
++ * visit to the same scene kind (character select -> stage select -> character select), which a scene-kind check cannot tell. */
++static s32 sPortSceneArenaSerial = 0;
++s32 port_scene_arena_serial(void)
++{
++	return sPortSceneArenaSerial;
++}
++
+ /* PORT scene arena. Allocated once in syTaskmanStartTask, recycled across
+  * every scene transition. File-scope so port-side diag and cache code can
+  * classify a pointer as in-arena vs reloc-file vs unknown without round-
+@@ -1367,6 +1375,8 @@
+ 			}
+ 		}
+ 
++		/* Smash Online: one more per scene arena recycle (port_scene_arena_serial). */
++		sPortSceneArenaSerial++;
+ 		if (gPortSceneHeap != NULL)
+ 		{
+ 			port_taskman_evict_arena_caches(gPortSceneHeap, gPortSceneHeapSize);
