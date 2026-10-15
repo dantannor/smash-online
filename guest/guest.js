@@ -100,6 +100,13 @@ async function connect() {
     const response = await fetch(`/api/rooms/${encodeURIComponent(room)}/join`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ slotToken }),
     });
+    if (response.status === 404) {
+      // The room is gone (its 30 min expired while the VM slept, or the host restarted into a new one): retrying the same link can
+      // never work. Go back through the permanent link, which wakes the VM and hands out the current room.
+      const entry = sessionStorage.getItem('smash-entry');
+      if (entry && ownGeneration === generation) { location.replace(entry); return; }
+      hint.hidden = false; hint.textContent = 'This game has ended. Open your permanent link again to start a new one.';
+    }
     if (!response.ok) throw new Error(`Join failed (${response.status})`);
     const joined = await response.json();
     if (ownGeneration !== generation) return;
