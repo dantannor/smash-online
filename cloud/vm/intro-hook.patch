@@ -94,12 +94,12 @@
  			mnPlayersVSPortSolo(pl, pg, fk);
 --- a/src/sc/scmanager.c
 +++ b/src/sc/scmanager.c
-@@ -2228,6 +2228,35 @@
+@@ -2228,6 +2228,36 @@
  	syTaskmanSetLoadScene();
  }
  
 +/* Smash Online: scene class for the idle-game logic in ftport.c (port_solo_poll): 1 intro movies, 2 title and attract demo,
-+ * 3 VS character select, 4 other menus, 0 anything else (matches, results, 1P). Only classes 1 to 4 may ever be left by a guest request. */
++ * 3 VS character select, 4 other menus and the VS results screen, 0 anything else (matches, 1P). Only classes 1 to 4 may ever be left by a guest request. */
 +s32 portSCManagerSceneClass(void)
 +{
 +	s32 s = gSCManagerSceneData.scene_curr;
@@ -110,6 +110,7 @@
 +#endif
 +	if (s == nSCKindTitle || s == nSCKindAutoDemo) return 2;
 +	if (s == nSCKindModeSelect || s == nSCKindVSMode || s == nSCKindVSOptions) return 4;
++	if (s == nSCKindVSResults) return 4; /* the last match's results screen: a game parked there after a session is idle too */
 +	return 0;
 +}
 +
