@@ -60,7 +60,7 @@ scripts/cloud.sh status | links --live | newroom | sync | idle <bootGraceMin> <i
 
 **Links.** All of them wake a stopped or suspended VM and drop you into the game when it is ready; the loading page shows progress, the invite link with a Copy button, and (on the P1 page) the friend links.
 - **Invite link** (`/join/<secret>`): whoever opens it first becomes P1, the next P2, then P3 and P4; a fifth sees "game is full". A browser keeps its slot across reloads and short absences (it remembers a token in localStorage; a slot is held for 90 s after its guest leaves, then the next opener may take it).
-- **P1 link** (`/go/<secret>`) and **friend links** (`/p/<secret>/2..4`): fixed slots, same wake behaviour.
+- **P1 link** (`/go/<secret>`) and **friend links** (`/p/<secret>/2..4`): fixed slots, same wake behaviour. To choose the P1 link, run `SMASH_P1_SECRET=<value> scripts/cloud.sh secrets` on the Mac (it updates `permanent.env` and the Worker); the live value is also in bws as `SMASH_P1_SECRET`.
 - A guest page whose room has died (the VM restarted into a new room) notices after about 24 s and returns through the link it came from, which hands out the live room.
 - Secrets are Worker secrets (`P1_SECRET`, `FRIEND_SECRET`, `INVITE_SECRET`, `VM_SECRET`, `GCP_SA_JSON`) plus `~/.smash-online/permanent.env` (0600) on your Mac; nothing is in the repo. The Worker holds the project's service-account key (the IAM API is disabled here, so a start/resume-only account could not be created) and calls `instances.start` / `resume` with a WebCrypto-signed JWT. It records every wake in a Durable Object (`GET /api/vm/wakes`, Bearer `VM_SECRET`) for diagnosing slow starts.
 
