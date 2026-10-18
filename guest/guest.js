@@ -14,7 +14,12 @@ const state = { connection: 'connecting', connected: false, slot: null, port: nu
 let offerWatchdog, missedOffers = 0;
 let metaChannel = null; // reliable side channel from the host (fighter finder)
 let peer, ws, dataChannel, videoStream, audioStream;
-let soundOn = false; // the video is always muted (so it autoplays everywhere); a user gesture only unlocks the separate audio element
+// The video is always muted (so it autoplays everywhere); the game's audio plays through a separate element. Sound is on by default:
+// the browser only allows it after a gesture, so the first click, tap or key press anywhere on the page unlocks it. A player who
+// switched sound off with the toggle stays muted across reloads (localStorage).
+let soundUnlocked = false;
+let soundMuted = false;
+try { soundMuted = localStorage.getItem('smash-muted') === '1'; } catch { /* storage unavailable: sound stays on */ }
 let reconnectTimer, reconnectDelay = 500, generation = 0, sequence = 0;
 let virtualInput = null;
 let lastInput = { buttons: 0, sx: 0, sy: 0 };
@@ -180,7 +185,8 @@ async function ensurePlaying() {
   if (!video.srcObject) return;
   video.muted = true;
   if (video.paused) { try { await video.play(); } catch { /* shown below if it is still stopped */ } }
-  if (soundOn && audioStream?.getAudioTracks().length && audio.paused) { audio.muted = false; try { await audio.play(); } catch { /* retried on the next gesture */ } }
+  audio.muted = soundMuted;
+  if (soundUnlocked && !soundMuted && audioStream?.getAudioTracks().length && audio.paused) { try { await audio.play(); } catch { /* retried on the next gesture */ } }
   if (videoIsPlaying()) hint.hidden = true; else showPlayHint();
 }
 function createPeer(ownGeneration) {
@@ -256,10 +262,22 @@ window.addEventListener('gamepaddisconnected', () => sendInput(true));
 for (const type of ['playing', 'loadedmetadata', 'loadeddata', 'canplay', 'pause', 'emptied', 'stalled']) video.addEventListener(type, () => { if (type === 'playing') hint.hidden = true; else void ensurePlaying(); });
 video.addEventListener('timeupdate', () => { if (!hint.hidden && videoIsPlaying()) hint.hidden = true; });
 const soundButton = document.querySelector('#sound');
-async function enableSound() { soundOn = true; soundButton.textContent = 'Sound on'; await ensurePlaying(); }
-soundButton.addEventListener('click', enableSound);
-// Any gesture (click, tap, key press) starts playback and unlocks sound; later ones retry if something is still stopped.
-for (const type of ['pointerdown', 'touchend', 'click', 'keydown']) window.addEventListener(type, () => { if (!soundOn) void enableSound(); else void ensurePlaying(); }, { capture: true });
+function renderSound() { soundButton.textContent = soundMuted ? 'Sound off' : 'Sound on'; soundButton.setAttribute('aria-pressed', String(!soundMuted)); }
+function setMuted(muted) {
+  soundMuted = muted;
+  try { localStorage.setItem('smash-muted', muted ? '1' : '0'); } catch { /* not remembered */ }
+  renderSound();
+  return ensurePlaying();
+}
+renderSound();
+// The toggle: unmutes when muted, mutes when playing. (A click before the first gesture counts as that gesture and keeps sound on.)
+soundButton.addEventListener('click', () => {
+  if (soundMuted) { soundUnlocked = true; void setMuted(false); }
+  else if (!soundUnlocked) { soundUnlocked = true; void ensurePlaying(); }
+  else void setMuted(true);
+});
+// Any other gesture (click, tap, key press) starts playback and unlocks sound unless the player muted it; later ones retry if something is still stopped.
+for (const type of ['pointerdown', 'touchend', 'click', 'keydown']) window.addEventListener(type, event => { if (event.target instanceof Element && event.target.closest('#sound')) return; soundUnlocked = true; void ensurePlaying(); }, { capture: true });
 const screenEl = document.querySelector('#screen');
 const fullscreenButton = document.querySelector('#fullscreen');
 const fullscreenElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
@@ -276,7 +294,7 @@ fullscreenButton.addEventListener('click', () => { void ensurePlaying(); toggleF
 for (const type of ['fullscreenchange', 'webkitfullscreenchange']) document.addEventListener(type, () => { fullscreenButton.textContent = fullscreenElement() ? 'Exit fullscreen (Esc)' : 'Fullscreen (F)'; });
 window.addEventListener('keydown', event => { if (event.code === 'KeyF' && !typingOrGrid(event) && !event.repeat && !event.metaKey && !event.ctrlKey && !event.altKey) toggleFullscreen(); });
 setInterval(() => sendInput(true), 1000 / 60);
-window.__smashGuest = { state, ensurePlaying, attachMeta, stats: async () => ({ ...state, rtcStats: peer ? [...(await peer.getStats()).values()] : [] }), get lastInput() { return { ...lastInput }; }, setVirtualInput };
+window.__smashGuest = { state, ensurePlaying, attachMeta, stats: async () => ({ ...state, rtcStats: peer ? [...(await peer.getStats()).values()] : [] }), get lastInput() { return { ...lastInput }; }, get sound() { return { unlocked: soundUnlocked, muted: soundMuted }; }, setVirtualInput };
 if (params.get('fakeInput') === 'script') {
   let tick = 0; setInterval(() => { tick++; setVirtualInput({ buttons: tick % 2 ? 0x8000 : 0, sx: tick % 2 ? 30 : -30, sy: 0 }); }, 500);
 }
@@ -302,6 +320,7 @@ function attachMeta(channel) {
     else if (message.type === 'roster:chunk') { for (const item of message.items || []) grid.custom.push(item); }
     else if (message.type === 'roster:end') buildGrid();
     else if (message.type === 'roster:page') grid.page = message.page;
+    else if (message.type === 'match:ended') showToast(`Player ${message.by} ended the match`);
   };
 }
 function sendMeta(value) { if (metaChannel?.readyState === 'open') { metaChannel.send(JSON.stringify(value)); return true; } return false; }
@@ -375,8 +394,15 @@ document.querySelector('#solo').addEventListener('click', () => {
   backToGame();
 });
 
-// Optional guest-side sharpening for a soft (low bitrate or upscaled) picture; remembered per browser.
-const sharpenButton = document.querySelector('#sharpen');
-function applySharpen(on) { video.classList.toggle('sharp', on); sharpenButton.setAttribute('aria-pressed', String(on)); try { localStorage.setItem('smash-sharpen', on ? '1' : '0'); } catch {} }
-sharpenButton.addEventListener('click', () => applySharpen(!video.classList.contains('sharp')));
-try { if (localStorage.getItem('smash-sharpen') === '1') applySharpen(true); } catch {}
+// Back to menu: any player can end the running match for everyone after a confirm. The host page passes it to the sidecar and the
+// game, which only acts during a match; every guest gets a toast once the game has acknowledged it (otherwise nothing happens).
+const endConfirm = document.querySelector('#end-confirm');
+const toastEl = document.querySelector('#toast');
+let toastTimer = 0;
+function showToast(text) { toastEl.textContent = text; toastEl.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toastEl.hidden = true; }, 4000); }
+document.querySelector('#back-to-menu').addEventListener('click', () => { endConfirm.hidden = false; document.querySelector('#end-no').focus(); });
+document.querySelector('#end-no').addEventListener('click', () => { endConfirm.hidden = true; });
+document.querySelector('#end-yes').addEventListener('click', () => {
+  endConfirm.hidden = true;
+  if (!sendMeta({ type: 'match:end' })) showToast('Not connected yet');
+});

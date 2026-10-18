@@ -35,6 +35,12 @@ The host connects only to loopback **`ws://127.0.0.1:8765`**. The sidecar accept
 
 While any remote slot is connected, rewrite the complete OSI1 file at least every 100 ms, incrementing its byte-5 sequence on every write. For a slot disconnect, write neutral input with `enabled=0` within 500 ms; disconnected ports use kind 0. Connected guests use kind 3, enabled 1. P1 uses kind 2 for game-window keyboard input, enabled 1 when the host input source is available. On sidecar shutdown, write one final neutral packet and close cleanly. Reject invalid port, stale connection ID, malformed input, and non-monotonic sequence updates.
 
+## Meta channel and the pick file (cloud VM)
+
+Besides `input`, the host opens a reliable ordered data channel labelled `meta` to every guest. Guest to host: `{type:"roster:pick",idx}`, `{type:"roster:solo",cpus}`, `{type:"roster:page",page}` and `{type:"match:end"}`. Host to guest: `roster:begin|chunk|end`, `{type:"roster:page",page,by}` and `{type:"match:ended",by}`. The host page forwards the guest requests to the sidecar on the loopback socket with the guest's port added; the sidecar writes them to the pick file the game polls (`SSB64_ROSTER_PICK_FILE`, one line `<seq> <code> <a> <b>`, a new `seq` is a new request, the `seq` present at start is ignored).
+
+**Back to menu.** The guest page asks "End this match for everyone?" and only on confirm sends `{type:"match:end"}`. The host page sends `{type:"match:end",port}` to the sidecar, which writes `<seq> 30 <port - 1> 0` to the pick file (`seq` is its clock in milliseconds) and waits up to 3 s for the game's ack. The game (`cloud/vm/endmatch-hook.patch`) acts only while a VS match is running (scene 22, `nSCKindVSBattle`): it leaves for the VS character select exactly like the pause-menu A+B+R+Z combo (`is_reset` set, so no sudden death or results) and writes `<seq> <port - 1>` to `<pick file>.ack`. Anywhere else (menus, intro, results, 1P) the request is dropped and no ack is written. When the ack with the same `seq` appears, the sidecar sends `{type:"match:ended",port}` to the host page, which sends `{type:"match:ended",by:port}` on every guest's `meta` channel; guests show the toast "Player N ended the match". No ack within 3 s means nothing happened and nobody is told.
+
 ## OSI1 file contract
 
 `OPENSMASH_LAUNCHER_INPUT` names the sidecar-owned 80-byte input file. `SSB64_BOOT_SLOTS=hhhh` and `SSB64_START_SCENE=16` are game launch settings. Example (the ROM path remains an argument to the game launcher, not the input-file path):

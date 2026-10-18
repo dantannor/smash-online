@@ -268,6 +268,31 @@ test("roster:solo writes '<seq> <10 + player> <connected mask> <cpus>' and valid
   assert.equal(host.messages.filter((m) => m.code === "invalid_solo").length, 3);
 });
 
+test("match:end writes '<seq> 30 <player - 1> 0' and reports match:ended only once the game acks that request", (t) => {
+  const { file } = fixture(t);
+  const pickFile = file + ".pick";
+  let clock = 5_000_000;
+  const sidecar = new Sidecar({ file, rosterPickFile: pickFile, now: () => clock }).start();
+  t.after(() => sidecar.close());
+  const host = client();
+  sidecar.requestEndMatch(3, host);
+  assert.equal(fs.readFileSync(pickFile, "utf8"), "5000000 30 2 0\n");
+  sidecar.checkEndAck();
+  assert.equal(host.messages.filter((m) => m.type === "match:ended").length, 0, "no ack: the game was not in a match, so stay silent");
+  fs.writeFileSync(pickFile + ".ack", "4999000 0\n"); // an older request's ack does not count
+  sidecar.checkEndAck();
+  assert.equal(host.messages.filter((m) => m.type === "match:ended").length, 0);
+  fs.writeFileSync(pickFile + ".ack", "5000000 2\n");
+  sidecar.checkEndAck();
+  assert.deepEqual(host.messages.filter((m) => m.type === "match:ended"), [{ type: "match:ended", port: 3 }]);
+  sidecar.checkEndAck();
+  assert.equal(host.messages.filter((m) => m.type === "match:ended").length, 1, "reported once");
+  sidecar.requestEndMatch(1, host); clock += 4000; sidecar.checkEndAck();
+  assert.equal(sidecar.pendingEnd, null, "an unacknowledged request expires");
+  sidecar.requestEndMatch(9, host);
+  assert.ok(host.messages.some((m) => m.code === "invalid_end"));
+});
+
 test("a first guest arriving after an idle spell writes the intro request; a second guest or a quick return does not", (t) => {
   const { file } = fixture(t);
   const pickFile = file + ".pick";

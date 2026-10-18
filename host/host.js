@@ -43,6 +43,7 @@ function handleMeta(port, raw) {
     sendSidecar({ type: "roster:solo", port, cpus: message.cpus });
     return;
   }
+  if (message?.type === "match:end") { sendSidecar({ type: "match:end", port }); return; }
   if (message?.type === "roster:page" && Number.isInteger(message.page) && message.page >= 0 && message.page < 4096) {
     lastRosterPage = message.page;
     sendSidecar({ type: "roster:page", page: message.page });
@@ -341,6 +342,13 @@ function connectSidecar() {
     for (const [port, peer] of peers) {
       if (peer.channel?.readyState === "open") sidecar.send(JSON.stringify({ type: "slot:connect", port, connectionId: peer.connectionId }));
     }
+  });
+  // The game acknowledged a Back to menu request (it only does during a match): tell every guest who ended it.
+  sidecar.addEventListener("message", event => {
+    let message;
+    try { message = JSON.parse(String(event.data)); } catch { return; }
+    if (message?.type !== "match:ended") return;
+    for (const peer of peers.values()) if (peer.meta?.readyState === "open") peer.meta.send(JSON.stringify({ type: "match:ended", by: message.port }));
   });
   sidecar.addEventListener("close", () => { p1Connected = false; sidecarRetry = setTimeout(connectSidecar, 1000); });
   sidecar.addEventListener("error", () => { try { sidecar.close(); } catch { /* noop */ } });

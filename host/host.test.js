@@ -69,7 +69,8 @@ test("host room links, canvas capture recovery, and guest input forwarding", { t
     await new Promise((resolve, reject) => { roomServer.listen(0, "127.0.0.1", resolve); roomServer.once("error", reject); });
     sidecarServer = http.createServer();
     const sidecarWss = new WebSocketServer({ server: sidecarServer });
-    sidecarWss.on("connection", ws => { ws.send(JSON.stringify({ type: "ready" })); ws.on("message", raw => sidecarMessages.push(JSON.parse(raw.toString()))); });
+    const sidecarSockets = new Set();
+    sidecarWss.on("connection", ws => { sidecarSockets.add(ws); ws.on("close", () => sidecarSockets.delete(ws)); ws.send(JSON.stringify({ type: "ready" })); ws.on("message", raw => sidecarMessages.push(JSON.parse(raw.toString()))); });
     await new Promise((resolve, reject) => { sidecarServer.listen(0, "127.0.0.1", resolve); sidecarServer.once("error", reject); });
 
     browser = await chromium.launch({ headless: true, timeout: 15_000, args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", "--autoplay-policy=no-user-gesture-required"] });
@@ -93,7 +94,9 @@ test("host room links, canvas capture recovery, and guest input forwarding", { t
       window.guestVideoTrack = null;
       window.guestPc = new RTCPeerConnection({ iceServers: [] });
       window.guestPc.addEventListener("track", event => { if (event.track.kind === "video") { window.guestTrackReceived = true; window.guestVideoTrack = event.track; } });
+      window.guestMetaMessages = [];
       window.guestPc.addEventListener("datachannel", event => {
+        if (event.channel.label === "meta") { window.guestMeta = event.channel; event.channel.addEventListener("message", message => window.guestMetaMessages.push(JSON.parse(message.data))); }
         window.guestChannel = event.channel;
         event.channel.addEventListener("open", () => event.channel.send(JSON.stringify({ seq: 1, t: 4.5, buttons: 32768, sx: 10, sy: -10 })));
       });
@@ -124,6 +127,14 @@ test("host room links, canvas capture recovery, and guest input forwarding", { t
     assert.equal(input.input.sx, 10);
     assert.equal(input.input.sy, -10);
     assert.equal(input.connectionId, connectionId);
+
+    // Back to menu: the guest's meta message reaches the sidecar with that guest's port; the sidecar's ack is told to every guest.
+    await guestPage.waitForFunction(() => window.guestMeta?.readyState === "open");
+    await guestPage.evaluate(() => window.guestMeta.send(JSON.stringify({ type: "match:end" })));
+    await new Promise(resolve => { const timer = setInterval(() => { if (sidecarMessages.some(m => m.type === "match:end") ) { clearInterval(timer); resolve(); } }, 25); });
+    assert.deepEqual(sidecarMessages.find(m => m.type === "match:end"), { type: "match:end", port: 2 });
+    for (const socket of sidecarSockets) socket.send(JSON.stringify({ type: "match:ended", port: 2 }));
+    await guestPage.waitForFunction(() => window.guestMetaMessages.some(m => m.type === "match:ended" && m.by === 2));
 
     const originalTrackId = await hostPage.evaluate(() => document.querySelector("#preview").srcObject.getVideoTracks()[0].id);
     await hostPage.evaluate(() => {

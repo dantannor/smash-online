@@ -81,6 +81,8 @@ Root cause of the 78 s overnight wake: after asking the Worker to suspend it, th
 
 **Single player (Play vs CPU).** From your own link, press **Play vs CPU** under the video (choose 1, 2 or 3 CPUs next to it); nobody else has to join. The guest sends `roster:solo` on the `meta` channel, the host page passes it to the sidecar, which writes `<seq> <10 + player> <mask of connected ports> <cpu count>` into the pick file; `cloud/vm/solo-hook.patch` (applied after the roster hooks by `cloud/vm/build-game.sh`) then gives you a random original fighter if you have not picked one, turns that many ports with no connected guest into CPUs (level 4, distinct random originals), and starts the match exactly as Start would (random stage, 5 stocks). Pick your fighter first if you want a specific one. Guests that are connected but have not chosen a fighter are dropped from that match, as with Start. It only acts on the character select screen; when a match ends the game returns there.
 
+**Back to menu.** Every player has a **Back to menu** button under the video. It asks "End this match for everyone?" and, on confirm, ends the running match and returns all players to the VS character select, the same effect as pause then A+B+R+Z. The guest sends `match:end` on the `meta` channel, the host page passes it to the sidecar, which writes `<seq> 30 <player - 1> 0` into the pick file; `cloud/vm/endmatch-hook.patch` (applied last by `build-game.sh`) acts only in a VS match and writes an ack file, and only then does everybody get the toast "Player N ended the match". Clicked anywhere else it does nothing. Wire details are in `PROTOCOL.md`.
+
 **Video.** The game window and capture are 1120x840 (`SMASH_VIDEO_W/H` in `/etc/smash-online.env`), up from 640x480 originally and 960x720 after that. Measured in a 4-player match, game swap rate and guest fps:
 
 | Machine, size | Game swap fps (mean / p5 / min) | Guest fps | Verdict |
@@ -93,7 +95,7 @@ Root cause of the 78 s overnight wake: after asking the Worker to suspend it, th
 | t2d-standard-8, 1280x960 | 56.7 / 52.5 / 48.3 | 59.0 | slightly slow |
 | t2d-standard-8, 1440x1080 | 46 to 53 | 58 | no |
 
-t2d vCPUs are real cores (c2d and c3 vCPUs are hyperthreads), which is why t2d-standard-8 beats the other 8-vCPU types here; the project's 12 vCPU quota rules out 16-vCPU types. `LP_NUM_THREADS` 4 and 6 were no better than 8. The sender is seeded at 4000 kbps with a 6000 kbps cap (about 4.5 to 5.5 Mbps per guest measured). The guest page has a **Sharpen** toggle (a convolution filter on the video) for a softer picture.
+t2d vCPUs are real cores (c2d and c3 vCPUs are hyperthreads), which is why t2d-standard-8 beats the other 8-vCPU types here; the project's 12 vCPU quota rules out 16-vCPU types. `LP_NUM_THREADS` 4 and 6 were no better than 8. The sender is seeded at 4000 kbps with a 6000 kbps cap (about 4.5 to 5.5 Mbps per guest measured).
 
 **Latency** (`harness/stage/`, 2026-10-13, t2d-standard-8, 1120x840, guest on a Mac at 12 ms RTT through the Cloudflare relay, 60 trials per column; method per row in `harness/stage/README.md`). The test presses L/R on the character select (a whole-screen change) and times the first changed frame on the guest. Stages, in ms, median / p90:
 
@@ -113,7 +115,7 @@ The dominant stage was the WebRTC pacer: it releases queued packets at 2.5 times
 
 Tried and not adopted: forcing the receiver playout delay to 0 (`WebRTC-ForceSendPlayoutDelay`) saves another 10 to 15 ms on a clean link but doubles the number of late frames under jitter (about 560 vs 220 per 45 s); capturing at 120 fps cut the capture stage from 11 to 4 ms but not the total (the encoder cadence absorbs it); a pacer factor of 16 was no better than 8. What remains: the game (about 24 ms, one 60 Hz frame of input sampling plus the llvmpipe render), the jitter buffer (about 25 ms) and the network. The page-flip test is the worst case for the video path; gameplay frames are about 10 KB, so ordinary moves see less of the pacer delay than this test did.
 
-**Audio.** The game plays into a PulseAudio null sink; a virtual source on its monitor is the host page's default input, sent as Opus to every guest through `getUserMedia` (Chrome cannot capture system audio on Linux). The first click or key press on a guest page turns sound on.
+**Audio.** The game plays into a PulseAudio null sink; a virtual source on its monitor is the host page's default input, sent as Opus to every guest through `getUserMedia` (Chrome cannot capture system audio on Linux). Sound is on by default on the guest page: the browser only allows audio after a gesture, so the page starts muted and the first click, tap or key press anywhere unlocks it (nobody has to find a button). The **Sound on / Sound off** button toggles it and the choice is kept in `localStorage` (`smash-muted`), so a player who muted stays muted after a reload.
 
 **Services** (systemd, all restart on failure): `smash-xvfb`, `smash-pulse`, `smash-game` (restarted by systemd when the engine aborts, game back in about 4 s), `smash-sidecar` (restarted when the OSI1 file gets a new inode), `smash-server`, `smash-chrome` (host page with `?p1guest=1&audio=1`) and `smash-ctl` (room, capture, links, Worker registration, idle suspend, resume recovery).
 
