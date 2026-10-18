@@ -130,6 +130,8 @@ export async function handleWake(request, env, url) {
   }
 
   const msgFor = (state) => state === "error" ? "Could not reach the cloud API, retrying…" : state === "stopping" ? "The server is shutting down, it will start again in a moment" : "Starting server, about 30 seconds";
+  // No link redirects straight to /play: the waiting page is what stores the entry path the guest falls back to when its room dies,
+  // and for the invite link it sends the browser's own client id. When the VM is already up its first poll answers at once.
   // Every link wakes the VM (the status poll with wake=1); plain status reads never do. A permanent P1/friend link names its port,
   // the invite link takes the lowest free one. `claim` records who holds which port so the next opener gets the next port.
   async function resolve({ wake, port, client }) {
@@ -153,8 +155,6 @@ export async function handleWake(request, env, url) {
     const secret = pathSecret(p1[1]);
     if (!secret || !(await sameSecret(secret, env.P1_SECRET))) return html("Not found", 404);
     if (p1[2]) return json(200, await resolve({ wake: url.searchParams.get("wake") === "1", port: 1 }));
-    const now = await resolve({ wake: false, port: 1 });
-    if (now.url) return new Response(null, { status: 302, headers: { location: now.url, "cache-control": "no-store" } });
     return waitPage({ title: "Starting the Smash server", message: msgFor("starting"), statusUrl: `/go/${secret}/status?wake=1`, extra: inviteBox() + `<h2>Friend links</h2>` + [2, 3, 4].map((port) => `<label class="muted">P${port}</label><input readonly value="${esc(`${origin}/p/${env.FRIEND_SECRET}/${port}`)}" onclick="this.select()">`).join("") });
   }
 
@@ -164,8 +164,6 @@ export async function handleWake(request, env, url) {
     if (!secret || !(await sameSecret(secret, env.FRIEND_SECRET))) return html("Not found", 404);
     const port = Number(friend[2]);
     if (friend[3]) return json(200, await resolve({ wake: url.searchParams.get("wake") === "1", port }));
-    const now = await resolve({ wake: false, port });                     // already up: skip the waiting page
-    if (now.url) return new Response(null, { status: 302, headers: { location: now.url, "cache-control": "no-store" } });
     return waitPage({ title: `Smash Online, player ${port}`, message: msgFor("starting"), statusUrl: `/p/${secret}/${port}/status?wake=1`, extra: inviteBox() });
   }
 
