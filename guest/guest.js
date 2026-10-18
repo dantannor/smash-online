@@ -105,7 +105,13 @@ async function connect() {
       // never work. Go back through the permanent link, which wakes the VM and hands out the current room.
       const entry = sessionStorage.getItem('smash-entry');
       if (entry && ownGeneration === generation) { location.replace(entry); return; }
+      // No permanent link to go back through (a bare play URL): stop for good, retrying a dead room would loop forever.
+      stopping = true;
+      clearTimeout(reconnectTimer); clearTimeout(disconnectTimer);
+      closeConnection();
+      setState('Game ended', 'this room no longer exists');
       hint.hidden = false; hint.textContent = 'This game has ended. Open your permanent link again to start a new one.';
+      return;
     }
     if (!response.ok) throw new Error(`Join failed (${response.status})`);
     const joined = await response.json();
