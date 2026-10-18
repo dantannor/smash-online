@@ -110,9 +110,10 @@ test("registration is authenticated; a fresh registration makes P1 and friends r
   assert.equal(p1.state, "ready");
   assert.equal(p1.url, `${origin}/play?room=room1&slot=tok1`);
   assert.equal((await status(`/p/${FRIEND}/3/status`)).url, `${origin}/play?room=room1&slot=tok3`);
-  const redirect = await get(`/p/${FRIEND}/4`);
-  assert.equal(redirect.status, 302);
-  assert.equal(redirect.headers.get("location"), `${origin}/play?room=room1&slot=tok4`);
+  // even with the VM up, a link serves the waiting page (it records smash-entry, the guest's way back when its room dies), never a bare 302
+  const page = await get(`/p/${FRIEND}/4`);
+  assert.equal(page.status, 200);
+  assert.match(await page.text(), /smash-entry/);
   assert.notEqual((await get(`/p/${FRIEND}/1`)).status, 302, "port 1 is not a friend slot");
 });
 
