@@ -4,7 +4,7 @@
 #   scripts/cloud.sh down     suspend the VM (memory and disk are kept; `down --stop` powers it off instead)
 #   scripts/cloud.sh status   VM state, services, guests, idle-shutdown settings
 #   scripts/cloud.sh links    print the permanent P1 and friend URLs (links --live: the current room's links)
-#   scripts/cloud.sh secrets [gcp-key.json]   generate the permanent-link secrets and store them as Worker secrets
+#   scripts/cloud.sh secrets [gcp-key.json]   (SMASH_P1_SECRET=<value> pins a chosen P1 link) generate the permanent-link secrets and store them as Worker secrets
 #   scripts/cloud.sh sync     copy this checkout to the VM and restart the services
 #   scripts/cloud.sh newroom  restart the host page (new room, new links)
 #   scripts/cloud.sh idle <bootGraceMin> <idleMin>   change the idle-shutdown timeouts
@@ -166,6 +166,10 @@ cmd_secrets() {
   if [[ ! -f "$PERM" ]]; then
     ( umask 077; printf 'P1_SECRET=%s\nFRIEND_SECRET=%s\nVM_SECRET=%s\n' "$(g)" "$(g)" "$(g)" > "$PERM" )
     say "generated $PERM"
+  fi
+  if [[ -n "${SMASH_P1_SECRET:-}" ]]; then # chosen P1 link: keep the Mac file in step so links/status use it and a later push never reverts it
+    ( umask 077; { grep -v '^P1_SECRET=' "$PERM"; printf 'P1_SECRET=%s\n' "$SMASH_P1_SECRET"; } > "$PERM.new" && mv "$PERM.new" "$PERM" )
+    say "P1_SECRET set from SMASH_P1_SECRET"
   fi
   grep -q '^INVITE_SECRET=' "$PERM" || { ( umask 077; printf 'INVITE_SECRET=%s\n' "$(g)" >> "$PERM" ); say "added INVITE_SECRET"; }
   ( . "$PERM"
