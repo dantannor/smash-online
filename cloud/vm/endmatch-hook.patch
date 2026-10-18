@@ -1,0 +1,54 @@
+--- a/src/ft/ftport.c
++++ b/src/ft/ftport.c
+@@ -1742,7 +1742,25 @@
+             {
+                 extern void port_log(const char *fmt, ...);
+                 lastSeq = seq;
+-                if (pl == 20)
++                if (pl == 30)
++                {
++                    /* "<seq> 30 <player> 0": Back to menu. Only a running match (class 5) is left; anywhere else the request is ignored. The
++                     * ack file (pick file + ".ack", "<seq> <player>") tells the sidecar it was applied, so only then do the players see the toast. */
++                    port_log("SOLO: end-match request from player %d in scene class %d%s\n", idx, (int)cls, cls == 5 ? " -> character select" : " (ignored)");
++                    if (cls == 5)
++                    {
++                        const char *pick = getenv("SSB64_ROSTER_PICK_FILE");
++                        char ackPath[512];
++                        FILE *ack;
++                        portSCManagerRequestJump(1);
++                        if (pick != NULL && snprintf(ackPath, sizeof ackPath, "%s.ack", pick) < (int)sizeof ackPath && (ack = fopen(ackPath, "w")) != NULL)
++                        {
++                            fprintf(ack, "%ld %d\n", seq, idx);
++                            fclose(ack);
++                        }
++                    }
++                }
++                else if (pl == 20)
+                 {
+                     port_log("SOLO: intro request in scene class %d%s\n", (int)cls, (cls == 2 || cls == 3 || cls == 4) ? " -> opening" : " (ignored)");
+                     if (cls == 2 || cls == 3 || cls == 4) portSCManagerRequestJump(0);
+--- a/src/sc/scmanager.c
++++ b/src/sc/scmanager.c
+@@ -2229,11 +2229,12 @@
+ }
+ 
+ /* Smash Online: scene class for the idle-game logic in ftport.c (port_solo_poll): 1 intro movies, 2 title and attract demo,
+- * 3 VS character select, 4 other menus and the VS results screen, 0 anything else (matches, 1P). Only classes 1 to 4 may ever be left by a guest request. */
++ * 3 VS character select, 4 other menus and the VS results screen, 5 a VS match, 0 anything else (1P, training). Only classes 1 to 5 may ever be left by a guest request. */
+ s32 portSCManagerSceneClass(void)
+ {
+ 	s32 s = gSCManagerSceneData.scene_curr;
+ 	if (s == nSCKindPlayersVS) return 3;
++	if (s == nSCKindVSBattle) return 5; /* a VS match in progress: the only class the Back to menu request may leave */
+ 	if (s >= nSCKindOpeningRoom && s <= nSCKindOpeningNewcomers) return 1;
+ #if defined(REGION_US)
+ 	if (s == nSCKindStartup) return 1;
+@@ -2249,7 +2250,7 @@
+ void portSCManagerRequestJump(s32 to_css)
+ {
+ 	extern void func_800266A0_272A0(void);
+-	if (gSCManagerSceneData.scene_curr == nSCKindAutoDemo) gSCManagerSceneData.is_reset = TRUE; /* leave the demo match like a reset does */
++	if (gSCManagerSceneData.scene_curr == nSCKindAutoDemo || gSCManagerSceneData.scene_curr == nSCKindVSBattle) gSCManagerSceneData.is_reset = TRUE; /* leave the demo or VS match like a reset (the A+B+R+Z combo) does: no sudden death, no results */
+ 	sPortResetTarget = to_css ? nSCKindPlayersVS : nSCKindOpeningRoom;
+ 	sPortResetPending = TRUE;
+ 	func_800266A0_272A0();

@@ -69,6 +69,12 @@ if [[ ! -f "$BS/decomp/.smash-online-arena-serial-applied" ]]; then
   git -C "$BS/decomp" apply "$HERE/arena-serial.patch"
   : > "$BS/decomp/.smash-online-arena-serial-applied"
 fi
+# Back to menu (endmatch-hook.patch): a "<seq> 30 <player> 0" request in the pick file leaves a running VS match for the VS character select,
+# the way the pause-menu A+B+R+Z combo does, and acknowledges it in "<pick file>.ack". Applies on top of the intro hook and the patches above.
+if [[ ! -f "$BS/decomp/.smash-online-endmatch-hook-applied" ]]; then
+  git -C "$BS/decomp" apply "$HERE/endmatch-hook.patch"
+  : > "$BS/decomp/.smash-online-endmatch-hook-applied"
+fi
 # RelocPointerTable: re-registering a live pointer reuses its slot instead of leaking one per scene change (the table aborted after a few
 # hours), plus one RELOCSTAT log line per scene change for crash-soak.sh (reloc-dedup.patch, in the BattleShip repo itself).
 if [[ ! -f "$BS/.smash-online-reloc-dedup-applied" ]]; then

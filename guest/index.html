@@ -19,7 +19,8 @@
     #audio{display:none}
     .buttons{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}.action{border:0;border-radius:999px;padding:8px 18px;color:white;background:#5b5be8;font:inherit;font-weight:700;cursor:pointer}.action.secondary{background:#272b36}.action[aria-pressed=true]{background:#5b5be8}
     .hint{position:absolute;inset:12px 16px auto;text-align:center;color:#d4d4d8;background:#10131bdc;border-radius:8px;padding:10px}
-    video.sharp{filter:url(#smash-sharpen)}
+    .confirm{display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap;padding:8px 12px;background:#2a1618;border:1px solid #6b2a2e;border-radius:6px;font-weight:700}.confirm[hidden]{display:none}.action.danger{background:#c0392b}
+    .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:20;max-width:90vw;padding:10px 18px;border-radius:999px;background:#10131bee;border:1px solid #3a2420;color:#f4f4f5;font-weight:700;pointer-events:none}.toast[hidden]{display:none}
     .legend{margin:0;text-align:center;color:#aeb2bf;font-size:.8rem}
     .help{margin:0 auto;max-width:760px;color:#aeb2bf;font-size:.85rem;line-height:1.5}.help summary{cursor:pointer;color:#e4e4e7;text-align:center}.error{color:#ff9b9b}
     /* fighter grid */
@@ -40,11 +41,12 @@
   </style>
 </head>
 <body>
-  <svg width="0" height="0" style="position:absolute" aria-hidden="true"><filter id="smash-sharpen" color-interpolation-filters="sRGB"><feConvolveMatrix order="3" kernelMatrix="0 -0.5 0 -0.5 3 -0.5 0 -0.5 0" divisor="1" preserveAlpha="true"/></filter></svg>
   <main class="page">
     <header class="top"><div class="title">Smash Online <span id="slot">Guest</span></div><div class="stats"><span id="connection">Connecting…</span><span id="ping">RTT: --</span><span id="fps">FPS: --</span><span id="controller">Controller: Keyboard</span></div></header>
     <section class="screen" id="screen"><video id="video" autoplay muted playsinline></video><audio id="audio" autoplay></audio><div class="hint" id="hint">Waiting for the host…</div></section>
-    <div class="buttons"><button class="action" id="sound" type="button">Click to enable sound</button><button class="action secondary" id="sharpen" type="button" aria-pressed="false">Sharpen</button><button class="action secondary" id="fullscreen" type="button">Fullscreen (F)</button></div>
+    <div class="buttons"><button class="action" id="sound" type="button" aria-pressed="true">Sound on</button><button class="action secondary" id="back-to-menu" type="button">Back to menu</button><button class="action secondary" id="fullscreen" type="button">Fullscreen (F)</button></div>
+    <div class="confirm" id="end-confirm" role="alertdialog" aria-label="End this match for everyone?" hidden><span>End this match for everyone?</span><button class="action danger" id="end-yes" type="button">End match</button><button class="action secondary" id="end-no" type="button">Cancel</button></div>
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
     <p class="legend">WASD / arrows: stick · J: A · K: B · L: Z · Shift: half stick (tilt) · F: fullscreen · scroll down to pick a fighter</p>
     <div class="bar"><span>Fighters</span><span class="grow" id="finder-page">Click a fighter to play as them</span><label>vs <select id="solo-cpus" aria-label="Number of CPU opponents"><option value="1">1 CPU</option><option value="2">2 CPUs</option><option value="3">3 CPUs</option></select></label><button class="action" id="solo" type="button">Play vs CPU</button></div>
     <input id="finder-search" type="search" placeholder="Search all fighters…" autocomplete="off">

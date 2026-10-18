@@ -7,6 +7,7 @@ import { WebSocketServer } from "ws";
 import { encodeOSI1, KINDS, clampInputMessage } from "../shared/protocol.js";
 
 const REFRESH_MS = 100;
+const END_ACK_MS = 3000; // how long a Back to menu request waits for the game to acknowledge it
 const INTRO_IDLE_MS = 60_000; // nobody connected this long = the game is idle
 const DEFAULT_TIMEOUT_MS = 500; // class default (contract); the CLI passes a longer one, see --input-timeout-ms
 const neutral = () => ({ kind: KINDS.DISCONNECTED, enabled: 0, buttons: 0, sx: 0, sy: 0 });
@@ -17,6 +18,7 @@ export class Sidecar {
     this.file = path.resolve(file);
     this.now = now;
     this.rosterPickFile = rosterPickFile;
+    this.pendingEnd = null; // Back to menu request waiting for the game's ack: { seq, port, client, until }
     this.introIdleMs = introIdleMs;
     this.lastOccupiedAt = now(); // last time any guest was connected; a guest arriving after introIdleMs of nobody restarts the game's intro
     this.rosterPageFile = rosterPageFile; // character-select page jumps for the native game (see cloud/vm/roster-page.patch)
@@ -53,6 +55,7 @@ export class Sidecar {
     this.writeSnapshot();
     this.timer = setInterval(() => {
       if (this.connections.some(Boolean)) this.lastOccupiedAt = this.now();
+      this.checkEndAck();
       this.writeSnapshot();
     }, REFRESH_MS);
     this.timer.unref?.();
@@ -149,6 +152,28 @@ export class Sidecar {
     catch (error) { this.onError(error); }
   }
 
+  // Back to menu: "<seq> 30 <player - 1> 0". The game only acts on it during a VS match, and then writes "<seq> <player - 1>" to
+  // "<pick file>.ack"; that ack (not the request) is what makes the sidecar report match:ended, so a click anywhere else is silent.
+  requestEndMatch(port, client) {
+    if (!this.rosterPickFile) return this.reject(client, "roster_unavailable", "this sidecar has no roster pick file");
+    if (!validPort(port)) return this.reject(client, "invalid_end", "bad port");
+    const seq = this.now();
+    try { fs.writeFileSync(this.rosterPickFile, `${seq} 30 ${port - 1} 0\n`); }
+    catch (error) { this.onError(error); return; }
+    this.pendingEnd = { seq, port, client, until: seq + END_ACK_MS };
+  }
+
+  checkEndAck() {
+    const pending = this.pendingEnd;
+    if (!pending) return;
+    if (this.now() > pending.until) { this.pendingEnd = null; return; }
+    let text;
+    try { text = fs.readFileSync(`${this.rosterPickFile}.ack`, "utf8"); } catch { return; }
+    if (Number(text.split(/\s+/)[0]) !== pending.seq) return;
+    this.pendingEnd = null;
+    pending.client?.sendJson({ type: "match:ended", port: pending.port });
+  }
+
   reject(client, code, message) { client?.sendJson({ type: "error", code, message }); }
 
   setP1(input) {
@@ -234,6 +259,7 @@ export function createSidecarServer(sidecar, { port = 8765, host = "127.0.0.1" }
       else if (message.type === "mute" && typeof message.value === "boolean") { sidecar.mute = message.value; sidecar.writeSnapshot(); }
       else if (message.type === "roster:pick") sidecar.requestRosterPick(message.port, message.idx, client);
       else if (message.type === "roster:solo") sidecar.requestSolo(message.port, message.cpus, client);
+      else if (message.type === "match:end") sidecar.requestEndMatch(message.port, client);
       else if (message.type === "roster:page") sidecar.requestRosterPage(message.page, client);
       else if (message.type === "slot:disconnect") sidecar.disconnect(message.port, message.connectionId, client);
       else sidecar.reject(client, "unknown_type", "unsupported message type");
