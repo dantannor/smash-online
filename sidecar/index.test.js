@@ -337,3 +337,37 @@ test("a press released within the same game frame stays in the file for a full f
   sidecar.input(3, "conn-other", { seq: 2, t: 2, buttons: 0, sx: 5, sy: 0 }, host);
   assert.equal(decodeOSI1(fs.readFileSync(file)).ports[2].sx, 5, "stick still follows the latest message");
 });
+
+test("logTelemetry appends sanitized JSONL per session and keeps no addresses", (t) => {
+  const { dir, file } = fixture(t);
+  const telemetryDir = path.join(dir, "telemetry");
+  const sidecar = new Sidecar({ file, telemetryDir, now: () => Date.UTC(2026, 9, 19, 12) });
+  assert.equal(sidecar.logTelemetry(2, "conn-a", { fps: 59.5, rttMs: 61, ip: "9.9.9.9", type: "telemetry" }), true);
+  assert.equal(sidecar.logTelemetry(2, "conn-a", { fps: 58 }), true);
+  assert.equal(sidecar.logTelemetry(3, "conn-b", { fps: 60 }), true);
+  assert.equal(sidecar.logTelemetry(2, "conn-a", { junk: 1 }), false);
+  assert.equal(sidecar.logTelemetry(9, "conn-a", { fps: 1 }), false);
+  assert.equal(sidecar.logTelemetry(2, "", { fps: 1 }), false);
+  const files = fs.readdirSync(telemetryDir).sort();
+  assert.equal(files.length, 2);
+  assert.match(files[0], /^2026-10-19T12-00-00-000Z-p2-1\.jsonl$/);
+  const lines = fs.readFileSync(path.join(telemetryDir, files[0]), "utf8").trim().split("\n").map(JSON.parse);
+  assert.deepEqual(lines, [{ at: "2026-10-19T12:00:00.000Z", port: 2, fps: 59.5, rttMs: 61 }, { at: "2026-10-19T12:00:00.000Z", port: 2, fps: 58 }]);
+});
+
+test("logTelemetry is off without a telemetry dir and over the socket", async (t) => {
+  const { dir, file } = fixture(t);
+  assert.equal(new Sidecar({ file }).logTelemetry(2, "c", { fps: 60 }), false);
+  const telemetryDir = path.join(dir, "tel");
+  const sidecar = new Sidecar({ file, telemetryDir }).start();
+  const server = createSidecarServer(sidecar, { port: 0 });
+  const address = await server.listen();
+  t.after(async () => { server.terminate(); sidecar.close(); await server.close(); });
+  const ws = new WebSocket(`ws://127.0.0.1:${address.port}`);
+  await new Promise((resolve) => ws.once("message", resolve));
+  ws.send(JSON.stringify({ type: "telemetry", port: 2, connectionId: "c1", sample: { fps: 60, rttMs: 55 } }));
+  for (let i = 0; i < 50 && !fs.existsSync(telemetryDir); i++) await sleep(20);
+  const [name] = fs.readdirSync(telemetryDir);
+  assert.match(fs.readFileSync(path.join(telemetryDir, name), "utf8"), /"fps":60/);
+  ws.close();
+});

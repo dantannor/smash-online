@@ -38,12 +38,13 @@
     .tile:hover,.tile:focus-visible{border-color:#ffd24a;outline:0}.tile.picked{border-color:#42e8a4}
     .finder-hint{color:#aeb2bf}
     @media (max-width:520px){.tiles{grid-template-columns:repeat(auto-fill,minmax(84px,1fr))}}
+  .stats-overlay{position:absolute;top:6px;left:6px;margin:0;padding:6px 8px;background:rgba(0,0,0,.65);color:#9f9;font:11px/1.35 ui-monospace,monospace;pointer-events:none;z-index:5;border-radius:4px}.stats-overlay[hidden]{display:none}
   </style>
 </head>
 <body>
   <main class="page">
     <header class="top"><div class="title">Smash Online <span id="slot">Guest</span></div><div class="stats"><span id="connection">Connecting…</span><span id="ping">RTT: --</span><span id="fps">FPS: --</span><span id="controller">Controller: Keyboard</span></div></header>
-    <section class="screen" id="screen"><video id="video" autoplay muted playsinline></video><audio id="audio" autoplay></audio><div class="hint" id="hint">Waiting for the host…</div></section>
+    <section class="screen" id="screen"><video id="video" autoplay muted playsinline></video><audio id="audio" autoplay></audio><pre class="stats-overlay" id="stats-overlay" hidden></pre><div class="hint" id="hint">Waiting for the host…</div></section>
     <div class="buttons"><button class="action" id="sound" type="button" aria-pressed="true">Sound on</button><button class="action secondary" id="back-to-menu" type="button">Back to menu</button><button class="action secondary" id="fullscreen" type="button">Fullscreen (F)</button></div>
     <div class="confirm" id="end-confirm" role="alertdialog" aria-label="End this match for everyone?" hidden><span>End this match for everyone?</span><button class="action danger" id="end-yes" type="button">End match</button><button class="action secondary" id="end-no" type="button">Cancel</button></div>
     <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>

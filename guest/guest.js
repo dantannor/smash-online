@@ -1,5 +1,6 @@
 import { mapGamepad, mapKeyboard, logicalKeys } from './input-map.js';
 import { clampInputMessage } from '../shared/protocol.js';
+import { snapshotStats, diffSample, overlayText } from '../shared/telemetry.js';
 
 const video = document.querySelector('#video');
 const audio = document.querySelector('#audio');
@@ -25,6 +26,11 @@ let virtualInput = null;
 let lastInput = { buttons: 0, sx: 0, sy: 0 };
 let lastEncoded = '';
 let statsTimer;
+// Session telemetry (see shared/telemetry.js). readStats already runs once a second; every 5th tick sends one sample to the host
+// over the reliable meta channel. Input cost is one counter increment per send; nothing runs per frame.
+const TELEMETRY_EVERY = 5;
+const telemetry = { ticks: 0, sends: 0, bufferedMax: 0, prevLive: null, prevSent: null, live: null };
+const statsOverlay = document.querySelector('#stats-overlay');
 let stopping = false;
 let iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
 const relayOnly = params.get('relay') === '1';
@@ -64,10 +70,11 @@ function sendInput(force = false) {
   if (!force && signature === lastEncoded) return;
   lastEncoded = signature;
   if (dataChannel?.readyState !== 'open') return;
-  try { dataChannel.send(encodeInput(next)); } catch { /* closed between check and send */ }
+  try { dataChannel.send(encodeInput(next)); telemetry.sends++; telemetry.bufferedMax = Math.max(telemetry.bufferedMax, dataChannel.bufferedAmount); } catch { /* closed between check and send */ }
 }
 function setVirtualInput(value) { virtualInput = clampInput(value); sendInput(true); return { ...virtualInput }; }
 function closeConnection() {
+  Object.assign(telemetry, { ticks: 0, sends: 0, bufferedMax: 0, prevLive: null, prevSent: null, live: null });
   if (statsTimer) clearInterval(statsTimer);
   statsTimer = null;
   if (dataChannel) { dataChannel.onopen = dataChannel.onclose = dataChannel.onerror = null; try { dataChannel.close(); } catch {} }
@@ -220,6 +227,21 @@ function createPeer(ownGeneration) {
   };
   statsTimer = setInterval(() => void readStats(), 1000);
 }
+function trackTelemetry(report) {
+  const snap = snapshotStats(report, { sends: telemetry.sends, buffered: dataChannel?.bufferedAmount ?? 0 });
+  const buffered = Math.max(telemetry.bufferedMax, snap.inputBuffered);
+  telemetry.live = diffSample(telemetry.prevLive, snap, buffered);
+  telemetry.prevLive = snap;
+  if (!statsOverlay.hidden) statsOverlay.textContent = overlayText(telemetry.live);
+  if (++telemetry.ticks % TELEMETRY_EVERY !== 0) return;
+  const sample = diffSample(telemetry.prevSent, snap, buffered);
+  telemetry.prevSent = snap;
+  telemetry.bufferedMax = 0;
+  if (sample) sendMeta({ type: 'telemetry', ...sample });
+}
+function setStatsOverlay(show) { statsOverlay.hidden = !show; if (show) statsOverlay.textContent = overlayText(telemetry.live); }
+if (params.get('stats') === '1') setStatsOverlay(true);
+window.addEventListener('keydown', event => { if (event.code === 'Backquote' && !typingTarget(event) && !event.repeat && !event.metaKey && !event.ctrlKey && !event.altKey) setStatsOverlay(statsOverlay.hidden); });
 function setReceiverLatency(track) {
   try {
     const receiver = peer?.getReceivers().find(item => item.track?.id === track.id);
@@ -237,6 +259,7 @@ async function readStats() {
       if (item.type === 'inbound-rtp' && item.kind === 'video' && Number.isFinite(item.framesPerSecond)) fps = item.framesPerSecond;
     });
     state.ping = rtt; state.fps = fps;
+    trackTelemetry(report);
     document.querySelector('#ping').textContent = `RTT: ${rtt == null ? '--' : `${Math.round(rtt)} ms`}`;
     document.querySelector('#fps').textContent = `FPS: ${fps == null ? '--' : Math.round(fps)}`;
   } catch { /* stats are diagnostic only */ }
@@ -294,7 +317,7 @@ fullscreenButton.addEventListener('click', () => { void ensurePlaying(); toggleF
 for (const type of ['fullscreenchange', 'webkitfullscreenchange']) document.addEventListener(type, () => { fullscreenButton.textContent = fullscreenElement() ? 'Exit fullscreen (Esc)' : 'Fullscreen (F)'; });
 window.addEventListener('keydown', event => { if (event.code === 'KeyF' && !typingOrGrid(event) && !event.repeat && !event.metaKey && !event.ctrlKey && !event.altKey) toggleFullscreen(); });
 setInterval(() => sendInput(true), 1000 / 60);
-window.__smashGuest = { state, ensurePlaying, attachMeta, stats: async () => ({ ...state, rtcStats: peer ? [...(await peer.getStats()).values()] : [] }), get lastInput() { return { ...lastInput }; }, get sound() { return { unlocked: soundUnlocked, muted: soundMuted }; }, setVirtualInput };
+window.__smashGuest = { state, ensurePlaying, attachMeta, stats: async () => ({ ...state, rtcStats: peer ? [...(await peer.getStats()).values()] : [] }), get lastInput() { return { ...lastInput }; }, get telemetry() { return { ...telemetry }; }, get sound() { return { unlocked: soundUnlocked, muted: soundMuted }; }, setVirtualInput };
 if (params.get('fakeInput') === 'script') {
   let tick = 0; setInterval(() => { tick++; setVirtualInput({ buttons: tick % 2 ? 0x8000 : 0, sx: tick % 2 ? 30 : -30, sy: 0 }); }, 500);
 }

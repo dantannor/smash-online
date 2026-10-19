@@ -1,12 +1,15 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 import { encodeOSI1, KINDS, clampInputMessage } from "../shared/protocol.js";
+import { sanitizeSample, telemetryLine } from "../shared/telemetry.js";
 
 const REFRESH_MS = 100;
+const TELEMETRY_MAX_LINES = 5000; // per session file (about 7 hours at one sample per 5 s)
 const END_ACK_MS = 3000; // how long a Back to menu request waits for the game to acknowledge it
 const INTRO_IDLE_MS = 60_000; // nobody connected this long = the game is idle
 const MIN_PRESS_MS = 20; // the game samples the file once per 16.7 ms frame; a press shorter than that can fall between two samples
@@ -14,11 +17,14 @@ const DEFAULT_TIMEOUT_MS = 500; // class default (contract); the CLI passes a lo
 const neutral = () => ({ kind: KINDS.DISCONNECTED, enabled: 0, buttons: 0, sx: 0, sy: 0 });
 
 export class Sidecar {
-  constructor({ file, p1 = "keyboard", mute = false, inputTimeoutMs = DEFAULT_TIMEOUT_MS, rosterPageFile = null, rosterPickFile = null, introIdleMs = INTRO_IDLE_MS, now = Date.now, onError = console.error }) {
+  constructor({ file, p1 = "keyboard", mute = false, inputTimeoutMs = DEFAULT_TIMEOUT_MS, rosterPageFile = null, rosterPickFile = null, telemetryDir = null, introIdleMs = INTRO_IDLE_MS, now = Date.now, onError = console.error }) {
     if (!file) throw new TypeError("an OSI1 file path is required");
     this.file = path.resolve(file);
     this.now = now;
     this.rosterPickFile = rosterPickFile;
+    this.telemetryDir = telemetryDir ? path.resolve(telemetryDir) : null; // one JSONL file per guest session; null disables logging
+    this.telemetrySessions = 0;
+    this.telemetryFiles = new Map(); // connectionId -> { file, lines }
     this.pendingEnd = null; // Back to menu request waiting for the game's ack: { seq, port, client, until }
     this.introIdleMs = introIdleMs;
     this.lastOccupiedAt = now(); // last time any guest was connected; a guest arriving after introIdleMs of nobody restarts the game's intro
@@ -269,6 +275,27 @@ export class Sidecar {
       }
     }
   }
+
+  // Append one guest telemetry sample to that session's JSONL file. Never throws: telemetry must not disturb play.
+  logTelemetry(port, connectionId, raw) {
+    if (!this.telemetryDir || !validPort(port) || !validConnectionId(connectionId)) return false;
+    const sample = sanitizeSample(raw);
+    if (!sample) return false;
+    try {
+      let session = this.telemetryFiles.get(connectionId);
+      if (!session) {
+        fs.mkdirSync(this.telemetryDir, { recursive: true, mode: 0o700 });
+        const stamp = new Date(this.now()).toISOString().replace(/[:.]/g, "-");
+        session = { file: path.join(this.telemetryDir, `${stamp}-p${port}-${++this.telemetrySessions}.jsonl`), lines: 0 };
+        if (this.telemetryFiles.size >= 16) this.telemetryFiles.delete(this.telemetryFiles.keys().next().value);
+        this.telemetryFiles.set(connectionId, session);
+      }
+      if (session.lines >= TELEMETRY_MAX_LINES) return false;
+      fs.appendFileSync(session.file, telemetryLine(port, sample, this.now()), { mode: 0o600 });
+      session.lines++;
+      return true;
+    } catch (error) { this.onError(error); return false; }
+  }
 }
 
 const validPort = (port) => Number.isInteger(port) && port >= 1 && port <= 4;
@@ -293,6 +320,7 @@ export function createSidecarServer(sidecar, { port = 8765, host = "127.0.0.1" }
       if (message.type === "slot:connect") sidecar.connect(message.port, message.connectionId, client);
       else if (message.type === "slot:input") sidecar.input(message.port, message.connectionId, message.input, client);
       else if (message.type === "mute" && typeof message.value === "boolean") { sidecar.mute = message.value; sidecar.writeSnapshot(); }
+      else if (message.type === "telemetry") sidecar.logTelemetry(message.port, message.connectionId, message.sample);
       else if (message.type === "roster:pick") sidecar.requestRosterPick(message.port, message.idx, client);
       else if (message.type === "roster:solo") sidecar.requestSolo(message.port, message.cpus, client);
       else if (message.type === "match:end") sidecar.requestEndMatch(message.port, client);
@@ -321,7 +349,7 @@ export function createSidecarServer(sidecar, { port = 8765, host = "127.0.0.1" }
 }
 
 function parseArgs(argv) {
-  const args = { file: null, port: 8765, p1: "keyboard", mute: false, inputTimeoutMs: 2500, rosterPageFile: null, rosterPickFile: null };
+  const args = { file: null, port: 8765, p1: "keyboard", mute: false, inputTimeoutMs: 2500, rosterPageFile: null, rosterPickFile: null, telemetryDir: path.join(os.homedir(), ".smash-online", "telemetry") };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--file") args.file = argv[++i];
     else if (argv[i] === "--port") args.port = Number(argv[++i]);
@@ -329,6 +357,7 @@ function parseArgs(argv) {
     else if (argv[i] === "--mute") args.mute = true;
     else if (argv[i] === "--input-timeout-ms") args.inputTimeoutMs = Number(argv[++i]);
     else if (argv[i] === "--roster-page-file") args.rosterPageFile = argv[++i];
+    else if (argv[i] === "--telemetry-dir") args.telemetryDir = argv[++i];
     else if (argv[i] === "--roster-pick-file") args.rosterPickFile = argv[++i];
     else throw new Error(`unknown option: ${argv[i]}`);
   }
@@ -343,7 +372,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   try {
     const args = parseArgs(process.argv.slice(2));
     const p1 = args.p1.startsWith("pad-helper:") ? args.p1 : args.p1;
-    const sidecar = new Sidecar({ file: args.file, p1, mute: args.mute, inputTimeoutMs: args.inputTimeoutMs, rosterPageFile: args.rosterPageFile, rosterPickFile: args.rosterPickFile }).start();
+    const sidecar = new Sidecar({ file: args.file, p1, mute: args.mute, inputTimeoutMs: args.inputTimeoutMs, rosterPageFile: args.rosterPageFile, rosterPickFile: args.rosterPickFile, telemetryDir: args.telemetryDir }).start();
     if (p1.startsWith("pad-helper:")) sidecar.startHelper(p1.slice("pad-helper:".length));
     const server = createSidecarServer(sidecar, { port: args.port });
     server.listen().then((address) => console.log(`sidecar listening on ws://${address.address}:${address.port}`)).catch((error) => { console.error(error); process.exitCode = 1; sidecar.close(); });

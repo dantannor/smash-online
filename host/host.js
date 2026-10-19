@@ -43,6 +43,7 @@ function handleMeta(port, raw) {
     sendSidecar({ type: "roster:solo", port, cpus: message.cpus });
     return;
   }
+  if (message?.type === "telemetry") { const peer = peers.get(port); if (peer) sendSidecar({ type: "telemetry", port, connectionId: peer.connectionId, sample: message }); return; }
   if (message?.type === "match:end") { sendSidecar({ type: "match:end", port }); return; }
   if (message?.type === "roster:page" && Number.isInteger(message.page) && message.page >= 0 && message.page < 4096) {
     lastRosterPage = message.page;
