@@ -9,6 +9,7 @@ import { encodeOSI1, KINDS, clampInputMessage } from "../shared/protocol.js";
 const REFRESH_MS = 100;
 const END_ACK_MS = 3000; // how long a Back to menu request waits for the game to acknowledge it
 const INTRO_IDLE_MS = 60_000; // nobody connected this long = the game is idle
+const MIN_PRESS_MS = 20; // the game samples the file once per 16.7 ms frame; a press shorter than that can fall between two samples
 const DEFAULT_TIMEOUT_MS = 500; // class default (contract); the CLI passes a longer one, see --input-timeout-ms
 const neutral = () => ({ kind: KINDS.DISCONNECTED, enabled: 0, buttons: 0, sx: 0, sy: 0 });
 
@@ -70,7 +71,8 @@ export class Sidecar {
     // attract demo or menus (never in a match), and never when another guest is already connected.
     if (!this.connections.some(Boolean) && this.now() - this.lastOccupiedAt >= this.introIdleMs) this.requestIntro();
     clearTimeout(this.connections[index]?.timeout);
-    const connection = { id: connectionId, lastSeq: null, lastInputAt: this.now(), client, timeout: null };
+    clearTimeout(this.connections[index]?.holdTimer);
+    const connection = { id: connectionId, lastSeq: null, lastInputAt: this.now(), client, timeout: null, buttons: 0, holdMask: 0, holdUntil: 0, holdTimer: null };
     this.connections[index] = connection;
     this.armTimeout(index, connection);
     this.slots[index] = { ...neutral(), kind: KINDS.FILE_DRIVEN_PAD, enabled: 1 };
@@ -90,8 +92,38 @@ export class Sidecar {
     connection.lastSeq = value.seq;
     connection.lastInputAt = this.now();
     this.armTimeout(index, connection);
-    this.slots[index] = { kind: KINDS.FILE_DRIVEN_PAD, enabled: 1, buttons: value.buttons, sx: value.sx, sy: value.sy };
+    this.holdNewPresses(connection, value.buttons);
+    this.slots[index] = { kind: KINDS.FILE_DRIVEN_PAD, enabled: 1, buttons: this.heldButtons(connection), sx: value.sx, sy: value.sy };
     this.writeSnapshot();
+    this.armHold(index, connection);
+  }
+
+  // Network jitter can bunch a press and its release into one burst, so the file would show the press for under a frame and the game
+  // would never see it. A newly pressed button therefore stays in the file for MIN_PRESS_MS even if its release has already arrived.
+  holdNewPresses(connection, buttons) {
+    const now = this.now();
+    const live = now < connection.holdUntil ? connection.holdMask : 0;
+    const added = buttons & ~connection.buttons;
+    connection.buttons = buttons;
+    if (added) { connection.holdMask = live | added; connection.holdUntil = now + MIN_PRESS_MS; }
+    else if (!live) connection.holdMask = 0;
+  }
+
+  heldButtons(connection) {
+    return connection.buttons | (this.now() < connection.holdUntil ? connection.holdMask : 0);
+  }
+
+  armHold(index, connection) {
+    clearTimeout(connection.holdTimer);
+    connection.holdTimer = null;
+    if ((connection.holdMask & ~connection.buttons) === 0) return;
+    connection.holdTimer = setTimeout(() => {
+      connection.holdTimer = null;
+      if (this.connections[index] !== connection) return;
+      this.slots[index] = { ...this.slots[index], buttons: this.heldButtons(connection) };
+      this.writeSnapshot();
+    }, Math.max(0, connection.holdUntil - this.now()));
+    connection.holdTimer.unref?.();
   }
 
   disconnect(port, connectionId, client) {
@@ -100,6 +132,7 @@ export class Sidecar {
     const connection = this.connections[index];
     if (!connection || connection.id !== connectionId) return this.reject(client, "stale_connection", "connectionId is not current for this port");
     clearTimeout(connection.timeout);
+    clearTimeout(connection.holdTimer);
     this.connections[index] = null;
     this.slots[index] = neutral();
     client.sendJson({ type: "slot:disconnected", port });
@@ -114,6 +147,9 @@ export class Sidecar {
       const elapsed = this.now() - connection.lastInputAt;
       if (elapsed < this.timeoutMs) return this.armTimeout(index, connection);
       connection.timeout = null;
+      clearTimeout(connection.holdTimer);
+      connection.buttons = 0;
+      connection.holdUntil = 0;
       this.slots[index] = { ...neutral(), kind: KINDS.FILE_DRIVEN_PAD, enabled: 1 };
       this.writeSnapshot();
     }, remaining);
@@ -214,7 +250,7 @@ export class Sidecar {
   close() {
     if (this.closed) return;
     clearInterval(this.timer);
-    this.connections.forEach((connection) => clearTimeout(connection?.timeout));
+    this.connections.forEach((connection) => { clearTimeout(connection?.timeout); clearTimeout(connection?.holdTimer); });
     this.connections.fill(null);
     this.slots = Array.from({ length: 4 }, neutral);
     this.closed = false;
@@ -269,6 +305,7 @@ export function createSidecarServer(sidecar, { port = 8765, host = "127.0.0.1" }
       for (let i = 0; i < 4; i++) {
         if (sidecar.connections[i]?.client === client) {
           clearTimeout(sidecar.connections[i].timeout);
+          clearTimeout(sidecar.connections[i].holdTimer);
           sidecar.connections[i] = null;
           sidecar.slots[i] = neutral();
         }
