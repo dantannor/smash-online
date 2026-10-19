@@ -312,3 +312,28 @@ test("a first guest arriving after an idle spell writes the intro request; a sec
   sidecar.connect(3, "c", host); // someone is already connected: never
   assert.equal(fs.existsSync(pickFile), false);
 });
+
+test("a press released within the same game frame stays in the file for a full frame, then releases", async (t) => {
+  const { file } = fixture(t);
+  const sidecar = new Sidecar({ file }).start();
+  t.after(() => sidecar.close());
+  const host = client();
+  const buttons = () => decodeOSI1(fs.readFileSync(file)).ports[1].buttons;
+  sidecar.connect(2, "conn-tap", host);
+  // Network jitter bunches a press and its release into one burst; the game samples the file once per 16.7 ms frame.
+  sidecar.input(2, "conn-tap", { seq: 1, t: 1, buttons: 0x8000, sx: 0, sy: 0 }, host);
+  sidecar.input(2, "conn-tap", { seq: 2, t: 2, buttons: 0, sx: 0, sy: 0 }, host);
+  assert.equal(buttons(), 0x8000, "a sampler running right after the burst must still see the press");
+  await sleep(40);
+  assert.equal(buttons(), 0, "the release must still arrive");
+  // A release that comes after a normal hold is not delayed.
+  sidecar.input(2, "conn-tap", { seq: 3, t: 3, buttons: 0x4000, sx: 0, sy: 0 }, host);
+  await sleep(40);
+  sidecar.input(2, "conn-tap", { seq: 4, t: 4, buttons: 0, sx: 0, sy: 0 }, host);
+  assert.equal(buttons(), 0);
+  // Another port's presses are untouched by this port's hold.
+  sidecar.connect(3, "conn-other", host);
+  sidecar.input(3, "conn-other", { seq: 1, t: 1, buttons: 1, sx: 0, sy: 0 }, host);
+  sidecar.input(3, "conn-other", { seq: 2, t: 2, buttons: 0, sx: 5, sy: 0 }, host);
+  assert.equal(decodeOSI1(fs.readFileSync(file)).ports[2].sx, 5, "stick still follows the latest message");
+});
