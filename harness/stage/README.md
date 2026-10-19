@@ -22,3 +22,25 @@ Needs `scripts/cloud.sh` set up (SSH config in `~/.smash-online`) and `vm-probe`
 | cap_to_recv | guest `requestVideoFrameCallback` `receiveTime` minus capture (encode, pacer, network one way) |
 | recv_to_present | guest callback time minus `receiveTime` (assembly, jitter buffer, decode, render) |
 | total | guest callback time of the first changed frame minus the timestamp before the press (guest clock only) |
+
+## Video smoothness for several guests (2026-10-19 baseline)
+
+```sh
+node harness/stage/host-sampler.mjs 60 > host.jsonl      # on the VM, sender side: encode ms, fps, kbps, qualityLimitationReason, VM CPU
+node harness/stage/video-baseline.mjs out.json 40 [--match|--unpause] <guest link> ...   # from anywhere with playwright
+```
+
+Run guests from a machine with enough cores: three headless guests on a 2-core box saturate its CPU (decode 13 ms per frame, 2 s of jitter buffer), which is the box and not the VM. One guest is a valid receiver view; the host sampler is valid for any number.
+
+Baseline in a real 4-fighter match, t2d-standard-8, 1120x840, guest on a 2-core Hetzner box (58 ms RTT through the Cloudflare relay):
+
+| | 1 guest | 3 guests |
+|---|---|---|
+| Sender fps (host page) | 59.0 | 59.5 each |
+| Encode (OpenH264) ms per frame | 4.3 | 5.7 |
+| Sender bitrate | 4.8 Mbps | 5.8 Mbps each (6 Mbps cap) |
+| `qualityLimitationReason` | bandwidth 46% of the time (the cap), cpu 0 s | bandwidth 15% |
+| VM CPU, mean / p95 | 41% / 52% | 45% / 52% |
+| Receiver decoded fps / freezes / dropped / lost | 59 / 0 / 0 / 0 | not valid (box CPU) |
+| Receiver jitter buffer, decode | 10 ms, 3.4 ms | not valid |
+| Keyframes | about 1 every 3.5 s | about 1 every 20 s |
