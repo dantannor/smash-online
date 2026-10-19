@@ -84,4 +84,4 @@ Also thanks to the BattleShip, `ssb-decomp-re`, libultraship and Torch projects 
 
 ## License
 
-No license has been chosen for this repo's own code yet, so for now all rights are reserved by the author. Third-party projects keep their own licenses (opensmash is MIT). Super Smash Bros. is a trademark of Nintendo. This project is not affiliated with Nintendo.
+This repo's own code is released under the [MIT License](LICENSE), the same license as opensmash. Super Smash Bros. and Nintendo assets are not covered by this license and are not included in this repo. Super Smash Bros. is a trademark of Nintendo. This project is not affiliated with Nintendo. Third-party projects keep their own licenses.
